@@ -59,6 +59,7 @@ behind, the guest itself is fine), `--res WxH` (the GTK window reports its own s
 
 The dev image lets cage draw the mouse cursor itself (`WLR_NO_HARDWARE_CURSORS=1`): the cursor plane of QEMU's
 virtio GPU shows the pointer about 64 px too low, so every click seemed to land above the cursor.
+
 The VM disk (`vm/disk.raw`, 16 GB sparse) keeps its data until `--fresh`.
 
 ### Android Auto in the VM (USB)
