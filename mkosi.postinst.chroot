@@ -13,3 +13,9 @@ systemctl mask systemd-boot-random-seed.service
 systemctl mask plymouth-quit.service plymouth-quit-wait.service
 # /etc is read-only: NetworkManager writes resolv.conf to /run
 ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf
+# Every device creates its own ssh host keys on the data partition (/usr/libexec/openhu-os/ssh-hostkeys), not the
+# ones the package generated while the image was built
+rm -f /etc/ssh/ssh_host_*
+# ssh: root's password from the data partition (openhu-ssh password), before the image's own accounts
+sed -i 's|^@include common-auth|auth sufficient pam_pwdfile.so pwdfile=/var/lib/openhu-os/ssh/passwd\n@include common-auth|' /etc/pam.d/sshd
+grep -q pam_pwdfile /etc/pam.d/sshd

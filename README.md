@@ -39,6 +39,22 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): update from the OpenHU settings
 ([openhu#28](https://github.com/average-web-dev/openhu/issues/28)), signed checksums, Raspberry Pi 4/5.
 
+## ssh
+
+Off in the release image. OpenHU switches it on and sets root's password
+([openhu#29](https://github.com/average-web-dev/openhu/issues/29)) through a small helper that the `openhu` user may
+run as root with `pkexec` (polkit rule, this program only):
+
+```bash
+pkexec /usr/libexec/openhu-os/openhu-ssh status        # {"enabled", "running", "password", "keys"}
+echo 'secret-password' | pkexec /usr/libexec/openhu-os/openhu-ssh password   # at least 8 characters
+pkexec /usr/libexec/openhu-os/openhu-ssh enable        # now and at every boot; disable switches it off
+```
+
+Everything is on the data partition (`/etc` is read-only): the switch `/var/lib/openhu-os/ssh/enabled`, the
+password hash (yescrypt) for `pam_pwdfile`, keys in `/var/lib/openhu-os/ssh/authorized_keys`, and the host keys,
+which every device creates on the first start of sshd. sshd listens on every network, the phone's hotspot too.
+
 ## Releases
 
 [GitHub releases](https://github.com/average-web-dev/openhu-os/releases): `openhu-os_<version>.raw.xz` to flash
@@ -47,7 +63,7 @@ Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): update 
 
 The workflow `.github/workflows/image.yml` runs on every push and pull request: newest OpenHU from its CI, dev image,
 three power cuts in a VM (KVM on the runner, no GPU: `--no-gl`), release image, which must show the OpenHU shell
-in a VM (`scripts/release-smoke-test.sh`, a screenshot check: the release image has no ssh). A tag `v<version>` (digits and dots,
+in a VM (`scripts/release-smoke-test.sh`, a screenshot check: ssh is off in a fresh release image). A tag `v<version>` (digits and dots,
 e.g. `v2026.10.13`) publishes the release; release images update from `releases/latest/download/`.
 
 ## Build
@@ -68,7 +84,7 @@ Profiles:
 
 | | dev | release |
 |---|---|---|
-| ssh | root with the key in `local/id_ed25519` (`scripts/ssh.sh`), password `openhu` | no |
+| ssh | always on: root with the key in `local/id_ed25519` (`scripts/ssh.sh`), password `openhu` | off until switched on in OpenHU (below) |
 | Console | serial (`ttyS0`), Ctrl+Alt+F2 switches away from cage | none |
 | Tools | `openhu-api`, `grim` (screenshots), strace, libinput-tools, … | none |
 

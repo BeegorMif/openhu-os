@@ -1,0 +1,9 @@
+#!/bin/sh
+# ssh host keys of this device on the data partition, created when sshd starts for the first time
+set -e
+dir=/var/lib/openhu-os/ssh
+mkdir -p "$dir"
+chmod 0755 "$dir"
+for type in ed25519 rsa; do
+  [ -f "$dir/ssh_host_${type}_key" ] || ssh-keygen -q -t "$type" -N "" -C "openhu-os $(hostname)" -f "$dir/ssh_host_${type}_key"
+done
