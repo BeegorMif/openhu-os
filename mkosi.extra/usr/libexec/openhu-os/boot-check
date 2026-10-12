@@ -13,7 +13,7 @@ duration() {
 }
 
 message="$(cat /run/openhu-os/boot-message 2>/dev/null)"
-message="${message:-Neue Version wird geprüft}"
+message="${message:-Checking the new version}"
 limit="$(duration $TIMEOUT)"
 start=$(date +%s)
 waited=0
@@ -29,6 +29,6 @@ while [ $waited -lt $TIMEOUT ]; do
 done
 echo "OpenHU did not answer within $limit" >&2
 # FailureAction=reboot follows; the next try or the version before is up to systemd-boot
-plymouth display-message --text="OpenHU startet nicht – Neustart" 2>/dev/null
+plymouth display-message --text="OpenHU does not start – restarting" 2>/dev/null
 sleep 3
 exit 1

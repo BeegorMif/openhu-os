@@ -8,21 +8,21 @@ if [ -r /run/openhu-os/boot-status.json ]; then
 import json, sys
 s = json.load(open(sys.argv[1]))
 message = {
-    "updated": f"Update auf {s.get('running')} installiert.",
-    "trial": f"Neue Version {s.get('running')} wird geprüft (Versuch {s.get('attempt')} von {s.get('tries')}).",
-    "rollback": f"Update auf {s.get('failed')} fehlgeschlagen, die vorherige Version läuft wieder.",
+    "updated": f"Update to {s.get('running')} installed.",
+    "trial": f"Checking the new version {s.get('running')} (try {s.get('attempt')} of {s.get('tries')}).",
+    "rollback": f"Update to {s.get('failed')} failed, the previous version runs again.",
 }.get(s.get("state"))
 if message:
     print(f"  {message}\n")
 PY
 fi
 cat <<'TEXT'
-  /      read-only (erofs), wird nur als Ganzes aktualisiert
-  /var   Daten: OpenHU in /var/lib/openhu, das Journal nur im RAM
+  /      read-only (erofs), only updated as a whole
+  /var   data: OpenHU in /var/lib/openhu, the journal only in RAM
 
-  openhu-update status | check | update     System-Update
-  journalctl -u openhu-session -f           Log von OpenHU
-  systemctl restart openhu-session          OpenHU neu starten
-  openhu-api system.methods                 WebSocket-API
+  openhu-update status | check | update     system update
+  journalctl -u openhu-session -f           log of OpenHU
+  systemctl restart openhu-session          restart OpenHU
+  openhu-api system.methods                 WebSocket API
 
 TEXT
