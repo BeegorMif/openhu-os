@@ -46,7 +46,8 @@ Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): update 
 (`openhu-os_<version>.root.raw.gz`, `openhu-os_<version>.efi`), the package manifest and `SHA256SUMS`.
 
 The workflow `.github/workflows/image.yml` runs on every push and pull request: newest OpenHU from its CI, dev image,
-three power cuts in a VM (KVM on the runner, no GPU: `--no-gl`), release image. A tag `v<version>` (digits and dots,
+three power cuts in a VM (KVM on the runner, no GPU: `--no-gl`), release image, which must show the OpenHU shell
+in a VM (`scripts/release-smoke-test.sh`, a screenshot check: the release image has no ssh). A tag `v<version>` (digits and dots,
 e.g. `v2026.10.13`) publishes the release; release images update from `releases/latest/download/`.
 
 ## Build
