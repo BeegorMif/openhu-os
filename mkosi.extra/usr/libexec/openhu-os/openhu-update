@@ -2,10 +2,11 @@
 """A/B update of OpenHU OS.
 
   openhu-update [status] [--json]               running version, both root slots, boot entries, update state
-  openhu-update check [--json]                  newest version on the update server
+  openhu-update check [--json]                  newest version on the USB sticks and the update server
   openhu-update update [--version V] [--reboot] install in the foreground (console)
   openhu-update start [--version V] [--json]    install in the background as openhu-update.service (OpenHU)
   openhu-update cancel [--json]                 stop the background update; the running version stays
+  openhu-update scan [--json]                   look at the USB sticks, write /run/openhu-os/usb-update.json
 
 OpenHU runs it as the openhu user with pkexec (polkit allows this program). The state of an update is in
 /run/openhu-os/update.json, readable without root: {"state": "checking" | "installing" | "done" | "uptodate" |
@@ -14,6 +15,12 @@ OpenHU runs it as the openhu user with pkexec (polkit allows this program). The 
 The update server is a directory with SHA256SUMS, openhu-os_<version>.root.raw.gz (root partition) and
 openhu-os_<version>.efi (unified kernel image), see scripts/add-update.sh. Its URL: OPENHU_UPDATE_URL, else URL= in
 /var/lib/openhu-os/update.conf, else in /usr/lib/openhu-os/update.conf.
+
+A USB stick is a second source: the same files, in the stick's top folder, in openhu-os/ or in a folder below
+openhu-os/ (several versions on one stick). openhu-usb@.service mounts sticks read-only under /run/media/<name> and
+runs "scan" when one comes or goes; /run/openhu-os/usb-update.json then has the newest version on the sticks:
+{"current", "version" (null without one), "newer", "path"}. The newest version of both sources wins, the stick on a
+tie (nothing to download).
 
 An update goes into the root slot that is not running, in an order that a power cut at any moment leaves the
 running version bootable:
@@ -46,6 +53,8 @@ ROOT_TYPES = {
     "b921b045-1df0-41c3-af44-4c6f280d3fae",  # root arm64
 }
 CONFIGS = ["/var/lib/openhu-os/update.conf", "/usr/lib/openhu-os/update.conf"]
+MEDIA = "/run/media"
+USB_STATE = "/run/openhu-os/usb-update.json"
 LOADER_GUID = "4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
 CHUNK = 1 << 20
 STATE = "/run/openhu-os/update.json"
@@ -68,22 +77,31 @@ def fail(message):
     raise UpdateError(message)
 
 
-def report(**fields):
-    """Writes the update state for OpenHU (atomically, readable by everyone)"""
-    os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    temp = STATE + ".new"
+def write_json(path, data):
+    """Atomically, readable by everyone (OpenHU)"""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temp = path + ".new"
     with open(temp, "w") as f:
-        json.dump(fields, f)
+        json.dump(data, f)
     os.chmod(temp, 0o644)
-    os.rename(temp, STATE)
+    os.rename(temp, path)
+
+
+def report(**fields):
+    """Writes the update state for OpenHU"""
+    write_json(STATE, fields)
+
+
+def read_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (FileNotFoundError, ValueError):
+        return {}
 
 
 def read_state():
-    try:
-        with open(STATE) as f:
-            return json.load(f)
-    except (FileNotFoundError, ValueError):
-        return {"state": "idle"}
+    return read_json(STATE) or {"state": "idle"}
 
 
 def output(data, text):
@@ -213,6 +231,58 @@ def available(base):
     return versions
 
 
+def stick_folders():
+    """Folders on the mounted USB sticks with a SHA256SUMS: the top folder, openhu-os/ and the folders in it"""
+    folders = []
+    try:
+        mounts = sorted(os.listdir(MEDIA))
+    except FileNotFoundError:
+        return folders
+    for name in mounts:
+        top = os.path.join(MEDIA, name)
+        if not os.path.ismount(top):
+            continue
+        candidates = [top, os.path.join(top, "openhu-os")]
+        try:
+            candidates += sorted(e.path for e in os.scandir(candidates[1]) if e.is_dir())
+        except OSError:
+            pass
+        folders += [c for c in candidates if os.path.isfile(os.path.join(c, "SHA256SUMS"))]
+    return folders
+
+
+def from_sticks():
+    """{version: (source, base URL, files)} of every version on the sticks; a stick that cannot be read is skipped"""
+    versions = {}
+    for folder in stick_folders():
+        base = "file://" + urllib.parse.quote(folder) + "/"
+        try:
+            found = available(base)
+        except (OSError, urllib.error.URLError, UnicodeDecodeError):
+            continue
+        for version, files in found.items():
+            # both files must be there, not only listed
+            if all(os.path.isfile(os.path.join(folder, n)) for n in files):
+                versions.setdefault(version, ("usb", base, files))
+    return versions
+
+
+def sources():
+    """{version: (source, base URL, files)} of the sticks and the update server; the stick wins a tie.
+    The server's error only counts without a stick: (versions, error of the server or None)"""
+    versions = from_sticks()
+    try:
+        base = server_url()
+        for version, files in available(base).items():
+            versions.setdefault(version, ("online", base, files))
+        return versions, None
+    except (UpdateError, OSError, urllib.error.URLError) as e:
+        message = f"update server: {e.reason}" if isinstance(e, urllib.error.URLError) else str(e)
+        if not versions:
+            raise UpdateError(message) from e
+        return versions, message
+
+
 class Progress:
     """Prints every 10 % and writes every 1 % of the overall progress to the state file"""
 
@@ -302,8 +372,9 @@ def status():
     state = read_state()
     if state.get("state") in ("checking", "installing") and not unit_active():
         state = {"state": "idle"}  # left over from an update that ended with the power
+    usb = read_json(USB_STATE)
     data = {"running": running_version(), "slot": running["path"], "other": slot_version(other),
-            "other_slot": other["path"], "entries": entries, "update": state, "active": unit_active()}
+            "other_slot": other["path"], "entries": entries, "update": state, "active": unit_active(), "usb": usb}
     lines = [f"running:    {data['running']} ({running['path']}, boot entry {efi_var('LoaderEntrySelected')})",
              f"other slot: {data['other'] or 'empty'} ({other['path']})"]
     for entry in entries:
@@ -311,16 +382,34 @@ def status():
         lines.append(f"  {entry['file']}: " + ("good" if left is None else f"{left} tries left" if left else "failed"))
     if data["active"] or state.get("state") not in (None, "idle"):
         lines.append(f"update: {json.dumps(state)}")
+    if usb.get("version"):
+        lines.append(f"USB stick: {usb['version']} ({usb['path']})")
     output(data, "\n".join(lines))
 
 
 def check():
     current = running_version()
-    versions = available(server_url())
+    versions, server_error = sources()
     newest = max(versions, key=version_key, default=None)
     newer = bool(newest) and version_key(newest) > version_key(current)
-    output({"current": current, "newest": newest, "available": newer},
-           f"update available: {current} -> {newest}" if newer else f"up to date: {current}")
+    source = versions[newest][0] if newest else None
+    data = {"current": current, "newest": newest, "available": newer, "source": source}
+    if server_error:
+        data["server_error"] = server_error
+    output(data, (f"update available: {current} -> {newest} ({'USB stick' if source == 'usb' else 'online'})"
+                  if newer else f"up to date: {current}") + (f"\n({server_error})" if server_error else ""))
+
+
+def scan():
+    """The newest version on the USB sticks for OpenHU (usb-update.json), run by openhu-usb@.service"""
+    current = running_version()
+    versions = from_sticks()
+    newest = max(versions, key=version_key, default=None)
+    path = urllib.parse.unquote(urllib.parse.urlparse(versions[newest][1]).path).rstrip("/") if newest else None
+    data = {"current": current, "version": newest, "path": path,
+            "newer": bool(newest) and version_key(newest) > version_key(current)}
+    write_json(USB_STATE, data)
+    output(data, f"USB stick: {newest} ({path})" if newest else "no update on a USB stick")
 
 
 def start(version=None):
@@ -357,8 +446,7 @@ def update(version=None, reboot=False):
 
     report(state="checking")
     current = running_version()
-    base = server_url()
-    versions = available(base)
+    versions, _ = sources()
     if version is None:
         version = max(versions, key=version_key, default=None)
         if version is None or version_key(version) <= version_key(current):
@@ -366,19 +454,19 @@ def update(version=None, reboot=False):
             output({"state": "uptodate", "version": current}, f"up to date: {current}")
             return
     if version not in versions:
-        fail(f"version {version} is not on {base}")
+        fail(f"version {version} is neither on a USB stick nor on the update server")
     if version == current:
         fail(f"version {version} is running")
 
     running, other, disk = slots()
     if not os.path.isdir(UKI_DIR):
         fail(f"{UKI_DIR} not found (ESP not mounted?)")
-    fields = {"from": current, "version": version}
+    source, base, files = versions[version]
+    fields = {"from": current, "version": version, "source": source}
     report(**fields, state="installing", phase="root", percent=0)
     if not JSON:
-        print(f"update {current} -> {version} into {other['path']}")
+        print(f"update {current} -> {version} into {other['path']}" + (" from the USB stick" if source == "usb" else ""))
 
-    files = versions[version]
     labelled = False
     try:
         # 1. the other slot's version can no longer boot, then its slot is free
@@ -396,7 +484,7 @@ def update(version=None, reboot=False):
         # 3. boot entry: from now on systemd-boot tries the new version first
         write_uki(urllib.parse.urljoin(base, f"{IMAGE_ID}_{version}.efi"), files[f"{IMAGE_ID}_{version}.efi"],
                   version, fields)
-    except (Cancelled, UpdateError, OSError, urllib.error.URLError) as e:
+    except (Cancelled, UpdateError, OSError, EOFError, urllib.error.URLError) as e:
         # the slot without a boot entry: empty again, so nothing shows a version that cannot boot
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if labelled:
@@ -405,6 +493,8 @@ def update(version=None, reboot=False):
         if isinstance(e, Cancelled):
             report(**fields, state="cancelled")
             raise
+        if source == "usb" and not os.path.isdir(urllib.parse.unquote(urllib.parse.urlparse(base).path)):
+            raise UpdateError("the USB stick was removed, the update was not installed") from e
         raise UpdateError(str(e)) from e
 
     report(**fields, state="done", percent=100)
@@ -415,7 +505,7 @@ def update(version=None, reboot=False):
 
 
 def versions_of(state):
-    return {k: v for k, v in state.items() if k in ("from", "version")}
+    return {k: v for k, v in state.items() if k in ("from", "version", "source")}
 
 
 def option(args, name):
@@ -448,6 +538,8 @@ def main(args):
             start(option(args, "--version"))
         elif command == "cancel":
             cancel()
+        elif command == "scan":
+            scan()
         else:
             sys.exit(__doc__)
     except urllib.error.URLError as e:
