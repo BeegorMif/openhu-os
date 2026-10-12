@@ -38,14 +38,14 @@ def main():
     if entry and entry.group("left") is not None:
         left, done = int(entry.group("left")), int(entry.group("done") or 0)
         status.update(state="trial", tries=left + done, attempt=done)
-        message = f"Neue Version {running} wird geprüft – Versuch {done} von {left + done}"
+        message = f"Checking the new version {running} – try {done} of {left + done}"
     else:
         # systemd-boot starts the newest version unless it ran out of tries: a newer entry means it failed
         newer = sorted((m.group("version") for m in map(ENTRY.match, efi_var("LoaderEntries"))
                         if m and version_key(m.group("version")) > version_key(running)), key=version_key)
         if newer:
             status.update(state="rollback", failed=newer[-1])
-            message = f"Update auf {newer[-1]} fehlgeschlagen – vorherige Version wiederhergestellt"
+            message = f"Update to {newer[-1]} failed – previous version restored"
 
     os.makedirs("/run/openhu-os", exist_ok=True)
     with open("/run/openhu-os/boot-status.json", "w") as f:
