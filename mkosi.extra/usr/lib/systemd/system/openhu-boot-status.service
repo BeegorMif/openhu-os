@@ -1,0 +1,16 @@
+# Shows on the splash when a new version is being tried or a failed update was rolled back
+# (/usr/libexec/openhu-os/boot-status); /run/openhu-os/boot-status.json for OpenHU.
+[Unit]
+Description=OpenHU OS boot status (update tries, rollback)
+DefaultDependencies=no
+After=plymouth-start.service systemd-tmpfiles-setup-dev.service
+Before=sysinit.target
+ConditionPathExists=/sys/firmware/efi
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/openhu-os/boot-status
+
+[Install]
+WantedBy=sysinit.target

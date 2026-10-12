@@ -6,6 +6,7 @@
 #                     [--instance NAME --ssh-port PORT] [--no-phone]
 #
 #   --fresh     new disk from the newest image (and fresh UEFI variables)
+#   --image F   with --fresh: this image instead of the newest (e.g. an older version to test updates)
 #   --no-gl     virtual GPU without 3D (cage/wlroots render with pixman, Qt with llvmpipe: slow video)
 #   --res       display size, default 1280x720 (the GTK window reports its own size instead)
 #   --ui UI     window: sdl (default), gtk or x11 (GTK through XWayland). The dev image draws the cursor in
@@ -29,11 +30,12 @@ OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
 # fixed: systemd derives the machine id from it in a VM
 VM_UUID=6f70656e-6875-4f53-8000-000000000001
-FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222
+IMAGE=""; FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --fresh) FRESH=1; shift ;;
+    --image) IMAGE="$2"; shift 2 ;;
     --no-gl) GL=0; shift ;;
     --res) RES="$2"; shift 2 ;;
     --headless) HEADLESS=1; shift ;;
@@ -48,7 +50,7 @@ done
 
 mkdir -p "$VM"
 if [ "$FRESH" = 1 ] || [ ! -f "$VM/disk.raw" ]; then
-  image="$(ls -t "$REPO"/mkosi.output/openhu-os_*.raw 2>/dev/null | grep -v '\.root-\|\.esp' | head -1)"
+  image="${IMAGE:-$(ls -t "$REPO"/mkosi.output/openhu-os_*.raw 2>/dev/null | grep -v '\.root\.raw$' | head -1)}"
   [ -n "$image" ] || { echo "no image in mkosi.output, run scripts/build.sh" >&2; exit 1; }
   echo "New VM disk from $(basename "$image")"
   cp --sparse=always "$image" "$VM/disk.raw"

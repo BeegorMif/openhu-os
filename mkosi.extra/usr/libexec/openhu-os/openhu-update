@@ -1,0 +1,325 @@
+#!/usr/bin/python3
+"""A/B update of OpenHU OS.
+
+  openhu-update [status]                       running version, both root slots, boot entries
+  openhu-update check                          newest version on the update server
+  openhu-update update [--version V] [--reboot]
+
+The update server is a directory with SHA256SUMS, openhu-os_<version>.root.raw.gz (root partition) and
+openhu-os_<version>.efi (unified kernel image), see scripts/add-update.sh. Its URL: OPENHU_UPDATE_URL, else URL= in
+/var/lib/openhu-os/update.conf, else in /usr/lib/openhu-os/update.conf.
+
+An update goes into the root slot that is not running, in an order that a power cut at any moment leaves the
+running version bootable:
+  1. remove the boot entry of the version in the other slot, relabel the slot "_empty"
+  2. write and verify the root partition, relabel the slot "openhu_<version>"
+  3. write and verify the unified kernel image as EFI/Linux/openhu-os_<version>+3.efi
+systemd-boot boots the newest version first and counts its tries. openhu-boot-check.service marks it good when
+OpenHU answers; after three failed tries systemd-boot boots the version before again.
+"""
+import fcntl
+import gzip
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+IMAGE_ID = "openhu-os"
+ESP = "/boot"
+UKI_DIR = ESP + "/EFI/Linux"
+EMPTY_LABEL = "_empty"
+SLOT_PREFIX = "openhu_"  # root slot label: openhu_<version>
+ROOT_TYPES = {
+    "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",  # root x86-64
+    "b921b045-1df0-41c3-af44-4c6f280d3fae",  # root arm64
+}
+CONFIGS = ["/var/lib/openhu-os/update.conf", "/usr/lib/openhu-os/update.conf"]
+LOADER_GUID = "4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
+CHUNK = 1 << 20
+
+
+def fail(message):
+    print(f"openhu-update: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def version_key(version):
+    """2026.10.12.1007 < 2026.10.12.1100; numbers compare as numbers"""
+    return [(0, int(part), "") if part.isdigit() else (1, 0, part) for part in re.split(r"[.~-]", version)]
+
+
+def running_version():
+    with open("/usr/lib/os-release") as f:
+        for line in f:
+            if line.startswith("IMAGE_VERSION="):
+                return line.split("=", 1)[1].strip().strip('"')
+    fail("no IMAGE_VERSION in /usr/lib/os-release")
+
+
+def server_url():
+    if os.environ.get("OPENHU_UPDATE_URL"):
+        return os.environ["OPENHU_UPDATE_URL"]
+    for path in CONFIGS:
+        try:
+            with open(path) as f:
+                for line in f:
+                    if line.startswith("URL=") and line.split("=", 1)[1].strip():
+                        return line.split("=", 1)[1].strip()
+        except FileNotFoundError:
+            pass
+    fail("no update server: URL= in /var/lib/openhu-os/update.conf")
+
+
+def efi_var(name):
+    try:
+        with open(f"/sys/firmware/efi/efivars/{name}-{LOADER_GUID}", "rb") as f:
+            return f.read()[4:].decode("utf-16-le").rstrip("\0")
+    except FileNotFoundError:
+        return None
+
+
+# --- disk ---
+
+def lsblk(*args):
+    out = subprocess.run(["lsblk", "--json", "--bytes", "-o", "PATH,PKNAME,PARTN,PARTTYPE,PARTLABEL,SIZE", *args],
+                         check=True, capture_output=True, text=True).stdout
+    return json.loads(out)["blockdevices"]
+
+
+def slots():
+    """(running slot, other slot) as lsblk entries"""
+    source = subprocess.run(["findmnt", "-n", "-o", "SOURCE", "/"], check=True, capture_output=True,
+                            text=True).stdout.strip()
+    running = lsblk("--nodeps", os.path.realpath(source))[0]
+    disk = "/dev/" + running["pkname"]
+    roots = [p for p in lsblk(disk) if (p.get("parttype") or "").lower() in ROOT_TYPES]
+    others = [p for p in roots if p["path"] != running["path"]]
+    if len(others) != 1:
+        fail(f"expected two root slots on {disk}, found {len(roots)}")
+    return running, others[0], disk
+
+
+def set_label(disk, partition, label):
+    # the kernel keeps its partition table while the disk is in use ("Re-reading the partition table failed"):
+    # the label is on the disk, that is enough
+    result = subprocess.run(["sfdisk", "--quiet", "--part-label", disk, str(partition["partn"]), label],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        fail(f"sfdisk: {result.stderr.strip()}")
+    os.sync()
+    # udev (lsblk, /dev/disk/by-partlabel) learns the new label
+    subprocess.run(["udevadm", "trigger", "--action=change", "--settle", partition["path"]], check=False)
+
+
+def slot_version(partition):
+    label = partition.get("partlabel") or ""
+    return label[len(SLOT_PREFIX):] if label.startswith(SLOT_PREFIX) else None
+
+
+# --- boot entries ---
+
+UKI_RE = re.compile(rf"^{re.escape(IMAGE_ID)}_(?P<version>[^+]+?)(\+(?P<left>\d+)(-(?P<done>\d+))?)?\.efi$")
+
+
+def boot_entries():
+    """{file name: (version, tries left or None)}"""
+    entries = {}
+    for name in sorted(os.listdir(UKI_DIR)):
+        match = UKI_RE.match(name)
+        if match:
+            left = match.group("left")
+            entries[name] = (match.group("version"), int(left) if left is not None else None)
+    return entries
+
+
+def remove_entries(version):
+    for name, (entry_version, _) in boot_entries().items():
+        if entry_version == version:
+            os.remove(os.path.join(UKI_DIR, name))
+    for name in os.listdir(UKI_DIR):
+        if name.startswith("."):  # half written by an interrupted update
+            os.remove(os.path.join(UKI_DIR, name))
+    os.sync()
+
+
+# --- server ---
+
+def fetch(url):
+    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "openhu-update"}), timeout=30)
+
+
+def available(base):
+    """{version: {file name: sha256}} with both files of a version"""
+    with fetch(urllib.parse.urljoin(base, "SHA256SUMS")) as response:
+        sums = {}
+        for line in response.read().decode().splitlines():
+            parts = line.split()
+            if len(parts) == 2:
+                sums[parts[1].lstrip("*")] = parts[0].lower()
+    versions = {}
+    for name in sums:
+        match = re.match(rf"^{re.escape(IMAGE_ID)}_(.+)\.efi$", name)
+        if match and f"{IMAGE_ID}_{match.group(1)}.root.raw.gz" in sums:
+            version = match.group(1)
+            versions[version] = {n: sums[n] for n in (f"{IMAGE_ID}_{version}.efi",
+                                                       f"{IMAGE_ID}_{version}.root.raw.gz")}
+    return versions
+
+
+class Progress:
+    def __init__(self, what, total):
+        self.what, self.total, self.done, self.shown = what, total, 0, -1
+
+    def add(self, n):
+        self.done += n
+        if self.total:
+            percent = self.done * 100 // self.total
+            if percent // 10 != self.shown // 10:
+                print(f"  {self.what}: {percent} %", flush=True)
+                self.shown = percent
+
+
+class HashingReader:
+    """Reads from a response, hashes and counts what was read (the compressed download)"""
+
+    def __init__(self, response, progress):
+        self.response, self.progress, self.sha = response, progress, hashlib.sha256()
+
+    def read(self, n=-1):
+        data = self.response.read(n)
+        self.sha.update(data)
+        self.progress.add(len(data))
+        return data
+
+
+def write_root(url, sha256, device, size):
+    with fetch(url) as response:
+        reader = HashingReader(response, Progress("root partition", int(response.headers.get("Content-Length") or 0)))
+        fd = os.open(device, os.O_WRONLY | os.O_CLOEXEC)
+        try:
+            written = 0
+            with gzip.GzipFile(fileobj=reader) as image:
+                while chunk := image.read(CHUNK):
+                    written += len(chunk)
+                    if written > size:
+                        fail(f"root image larger than the slot ({size} bytes)")
+                    os.write(fd, chunk)
+            while reader.read(CHUNK):  # trailing data still counts for the checksum
+                pass
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    if reader.sha.hexdigest() != sha256:
+        fail("root partition: checksum mismatch, the slot stays empty")
+
+
+def write_uki(url, sha256, version):
+    temp = os.path.join(UKI_DIR, f".{IMAGE_ID}_{version}.efi.part")
+    sha = hashlib.sha256()
+    with fetch(url) as response, open(temp, "wb") as f:
+        progress = Progress("kernel image", int(response.headers.get("Content-Length") or 0))
+        while chunk := response.read(CHUNK):
+            sha.update(chunk)
+            f.write(chunk)
+            progress.add(len(chunk))
+        f.flush()
+        os.fsync(f.fileno())
+    if sha.hexdigest() != sha256:
+        os.remove(temp)
+        fail("kernel image: checksum mismatch")
+    # three tries, counted by systemd-boot; openhu-boot-check.service removes the counter
+    os.rename(temp, os.path.join(UKI_DIR, f"{IMAGE_ID}_{version}+3.efi"))
+    os.sync()
+
+
+# --- commands ---
+
+def status():
+    running, other, _ = slots()
+    print(f"running:    {running_version()} ({running['path']}, boot entry {efi_var('LoaderEntrySelected')})")
+    print(f"other slot: {slot_version(other) or 'empty'} ({other['path']})")
+    for name, (version, left) in boot_entries().items():
+        state = "good" if left is None else (f"{left} tries left" if left > 0 else "failed")
+        print(f"  {name}: {state}")
+
+
+def check():
+    current = running_version()
+    versions = available(server_url())
+    newest = max(versions, key=version_key, default=None)
+    if newest and version_key(newest) > version_key(current):
+        print(f"update available: {current} -> {newest}")
+    else:
+        print(f"up to date: {current}")
+
+
+def update(version=None, reboot=False):
+    lock = open("/run/openhu-update.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fail("another update is running")
+
+    current = running_version()
+    base = server_url()
+    versions = available(base)
+    if version is None:
+        version = max(versions, key=version_key, default=None)
+        if version is None or version_key(version) <= version_key(current):
+            print(f"up to date: {current}")
+            return
+    if version not in versions:
+        fail(f"version {version} is not on {base}")
+    if version == current:
+        fail(f"version {version} is running")
+
+    running, other, disk = slots()
+    if not os.path.isdir(UKI_DIR):
+        fail(f"{UKI_DIR} not found (ESP not mounted?)")
+    print(f"update {current} -> {version} into {other['path']}")
+
+    # 1. the other slot's version can no longer boot, then its slot is free
+    old = slot_version(other)
+    if old:
+        remove_entries(old)
+    set_label(disk, other, EMPTY_LABEL)
+
+    # 2. root partition, labelled only once it is complete
+    files = versions[version]
+    write_root(urllib.parse.urljoin(base, f"{IMAGE_ID}_{version}.root.raw.gz"),
+               files[f"{IMAGE_ID}_{version}.root.raw.gz"], other["path"], other["size"])
+    set_label(disk, other, SLOT_PREFIX + version)
+
+    # 3. boot entry: from now on systemd-boot tries the new version first
+    write_uki(urllib.parse.urljoin(base, f"{IMAGE_ID}_{version}.efi"), files[f"{IMAGE_ID}_{version}.efi"], version)
+
+    print(f"version {version} installed, active after a reboot (3 tries, then back to {current})")
+    if reboot:
+        subprocess.run(["systemctl", "reboot"], check=True)
+
+
+def main(args):
+    if os.geteuid() != 0:
+        fail("needs root")
+    command = args[0] if args else "status"
+    if command == "status":
+        status()
+    elif command == "check":
+        check()
+    elif command == "update":
+        version = args[args.index("--version") + 1] if "--version" in args else None
+        update(version, reboot="--reboot" in args)
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except urllib.error.URLError as e:
+        fail(f"update server: {e}")

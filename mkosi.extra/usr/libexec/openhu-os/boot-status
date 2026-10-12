@@ -1,0 +1,59 @@
+#!/usr/bin/python3
+"""Boot status from systemd-boot's variables, shown on the splash and kept in /run/openhu-os/boot-status.json:
+
+  normal    the newest good version
+  trial     a new version is being tried (openhu-update installed it with three tries), "try" of "tries"
+  rollback  a newer version failed three times, systemd-boot booted the version before ("failed")
+"""
+import json
+import os
+import re
+import subprocess
+
+GUID = "4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
+ENTRY = re.compile(r"^openhu-os_(?P<version>[^+]+?)(\+(?P<left>\d+)(-(?P<done>\d+))?)?\.efi$")
+
+
+def efi_var(name):
+    try:
+        with open(f"/sys/firmware/efi/efivars/{name}-{GUID}", "rb") as f:
+            return [v for v in f.read()[4:].decode("utf-16-le").split("\0") if v]
+    except OSError:
+        return []
+
+
+def version_key(version):
+    return [(0, int(p), "") if p.isdigit() else (1, 0, p) for p in re.split(r"[.~-]", version)]
+
+
+def main():
+    with open("/usr/lib/os-release") as f:
+        running = next((l.split("=", 1)[1].strip().strip('"') for l in f if l.startswith("IMAGE_VERSION=")), "")
+    status = {"state": "normal", "running": running}
+    message = None
+
+    count_path = efi_var("LoaderBootCountPath")
+    entry = ENTRY.match(os.path.basename(count_path[0].replace("\\", "/"))) if count_path else None
+    if entry and entry.group("left") is not None:
+        left, done = int(entry.group("left")), int(entry.group("done") or 0)
+        status.update(state="trial", tries=left + done, attempt=done)
+        message = f"Neue Version {running} wird geprüft – Versuch {done} von {left + done}"
+    else:
+        # systemd-boot starts the newest version unless it ran out of tries: a newer entry means it failed
+        newer = sorted((m.group("version") for m in map(ENTRY.match, efi_var("LoaderEntries"))
+                        if m and version_key(m.group("version")) > version_key(running)), key=version_key)
+        if newer:
+            status.update(state="rollback", failed=newer[-1])
+            message = f"Update auf {newer[-1]} fehlgeschlagen – vorherige Version wiederhergestellt"
+
+    os.makedirs("/run/openhu-os", exist_ok=True)
+    with open("/run/openhu-os/boot-status.json", "w") as f:
+        json.dump(status, f)
+    if message:
+        with open("/run/openhu-os/boot-message", "w") as f:  # boot-check adds its time to it
+            f.write(message)
+        print(message)
+        subprocess.run(["plymouth", "display-message", f"--text={message}"], check=False)
+
+
+main()

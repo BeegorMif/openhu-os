@@ -1,0 +1,16 @@
+# After an update (openhu-update) systemd-boot tries the new version three times. This check decides whether a try
+# counts as good: then systemd-bless-boot keeps the version, otherwise the system reboots and, after the third
+# failure, systemd-boot boots the version before again. Pulled in by boot-complete.target, which only exists while
+# tries are counted.
+[Unit]
+Description=OpenHU boot check (keeps an updated version only when OpenHU comes up)
+After=openhu-session.service
+Before=boot-complete.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/openhu-os/boot-check
+FailureAction=reboot
+
+[Install]
+RequiredBy=boot-complete.target

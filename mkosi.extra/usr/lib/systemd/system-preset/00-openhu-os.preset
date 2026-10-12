@@ -3,5 +3,7 @@ enable NetworkManager.service
 enable bluetooth.service
 enable systemd-timesyncd.service
 enable openhu-session.service
+enable openhu-boot-check.service
+enable openhu-boot-status.service
 enable fstrim.timer
 disable *
