@@ -1,0 +1,30 @@
+#!/bin/sh
+# Boot check of a new version (runs only while systemd-boot counts its tries, see openhu-boot-check.service):
+# OpenHU must come up and answer on its API. The splash shows how long it has been waiting, like systemd does for a
+# slow start job: "… (23s / 1min 30s)".
+TIMEOUT=90
+
+duration() {
+  if [ "$1" -ge 60 ]; then
+    if [ $(($1 % 60)) -eq 0 ]; then echo "$(($1 / 60))min"; else echo "$(($1 / 60))min $(($1 % 60))s"; fi
+  else
+    echo "${1}s"
+  fi
+}
+
+message="$(cat /run/openhu-os/boot-message 2>/dev/null)"
+message="${message:-Neue Version wird geprüft}"
+limit="$(duration $TIMEOUT)"
+start=$(date +%s)
+waited=0
+while [ $waited -lt $TIMEOUT ]; do
+  /usr/libexec/openhu-os/openhu-api system.ping >/dev/null 2>&1 && exit 0
+  plymouth display-message --text="$message ($(duration $waited) / $limit)" 2>/dev/null
+  sleep 1
+  waited=$(($(date +%s) - start))
+done
+echo "OpenHU did not answer within $limit" >&2
+# FailureAction=reboot follows; the next try or the version before is up to systemd-boot
+plymouth display-message --text="OpenHU startet nicht – Neustart" 2>/dev/null
+sleep 3
+exit 1

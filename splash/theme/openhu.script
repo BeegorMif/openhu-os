@@ -25,6 +25,25 @@ for (i = 0; i < 3; i++)
     dots[i].SetOpacity(0.25);
 }
 
+// Status text below the dots (plymouth display-message): update being tried, rollback, see
+// /usr/libexec/openhu-os/boot-status. Text colour of the shell (Theme.qml: #e8eef4).
+message = Sprite();
+message_font = "DejaVu Sans " + Math.Int(Math.Max(10, screen_height / 48));
+fun display_message_callback(text)
+{
+    image = Image.Text(text, 0.910, 0.933, 0.957, 1, message_font);
+    message.SetImage(image);
+    message.SetX(Window.GetX() + (screen_width - image.GetWidth()) / 2);
+    message.SetY(dots[0].GetY() + dot_size * 4);
+    message.SetOpacity(1);
+}
+fun hide_message_callback(text)
+{
+    message.SetOpacity(0);
+}
+Plymouth.SetDisplayMessageFunction(display_message_callback);
+Plymouth.SetHideMessageFunction(hide_message_callback);
+
 frame = 0;
 fun refresh_callback()
 {

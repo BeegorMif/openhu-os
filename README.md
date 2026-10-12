@@ -28,8 +28,16 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
   with a real logo any time. `scripts/build.sh` packages the theme as `openhu-os-splash`.
 - **Small initrd:** only the modules mkosi's initrd needs (54 MB unified kernel image instead of 136 MB)
 
-Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): A/B updates with automatic rollback, CI
-releases, Raspberry Pi 4/5.
+- **A/B updates:** `openhu-update` writes a new version into the other root slot and its unified kernel image into
+  the ESP with three boot tries (systemd-boot boot counting). The new version is kept when OpenHU comes up
+  (`openhu-boot-check.service`, then `systemd-bless-boot`); after three failed tries systemd-boot boots the version
+  before again. A power cut during an update leaves the running version bootable. No automatic updates: only
+  `openhu-update update` (later a button in OpenHU, openhu#28) starts one.
+  The splash says when a new version is being tried ("Versuch 1 von 3") and when a failed update was rolled back;
+  `/run/openhu-os/boot-status.json` has the same for OpenHU (`normal`, `trial`, `rollback`).
+
+Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): CI releases and an update server, update
+from the OpenHU settings, Raspberry Pi 4/5.
 
 ## Build
 
@@ -72,6 +80,32 @@ virtio GPU shows the pointer about 64 px too low, so every click seemed to land 
 
 The VM disk (`vm/disk.raw`, 16 GB sparse) keeps its data until `--fresh`.
 
+### Updates
+
+```bash
+scripts/build.sh --version 2026.10.13.1        # a newer version
+scripts/add-update.sh                          # newest build into mkosi.output/updates (root partition, UKI, SHA256SUMS)
+scripts/serve-updates.sh                       # http://127.0.0.1:8070, the dev image's update server
+scripts/ssh.sh openhu-update check
+scripts/ssh.sh openhu-update update --reboot
+scripts/ssh.sh openhu-update status            # slots and boot entries: good, n tries left, failed
+```
+
+`run-vm.sh --fresh --image mkosi.output/openhu-os_<version>.raw` starts from an older version. Debian has no
+`systemd-sysupdate`, so `openhu-update` (`/usr/libexec/openhu-os`, Python) does the job:
+
+1. removes the boot entry of the version in the other slot and labels the slot `_empty`
+2. streams `openhu-os_<version>.root.raw.gz` into the slot, checks the SHA-256, labels it `openhu_<version>`
+3. writes `EFI/Linux/openhu-os_<version>+3.efi` (checked, then renamed)
+
+The release image's update server is still empty (`/usr/lib/openhu-os/update.conf`, override in
+`/var/lib/openhu-os/update.conf`); releases with signed checksums come with CI.
+
+`scripts/update-test.sh` runs the whole story in a second VM (`vm/updatetest/`, ssh 2224, update server 8071):
+builds versions 1, 2 and a broken 3 (OpenHU masked), updates 1 → 2 (setting kept, marked good), cuts the power
+while the next update writes the root partition (2 still boots, slot empty again) and installs 3 (three failed
+tries, back on 2). About 6 minutes plus the builds; `scripts/update-test.sh V1 V2 V3` reuses builds.
+
 ### Power cut test
 
 ```bash
@@ -102,12 +136,13 @@ host first (e.g. the openhu dev container), they would grab the phone.
 ```
 mkosi.conf, mkosi.conf.d/   distribution, packages (base, session, openhu, kernel)
 mkosi.profiles/             dev and release
-mkosi.repart/               partitions of the image: ESP, root slot A (erofs)
+mkosi.repart/               partitions of the image: ESP, root slot A (erofs, also split out as the update)
 mkosi.extra/                files in the image: session unit, sysusers, PAM, polkit, presets, journald, openhu-api,
-                            first boot partitions (usr/lib/repart.d: slot B, data), fstab for /var
+                            first boot partitions (usr/lib/repart.d: slot B, data), fstab for /var, openhu-update,
+                            boot check
 mkosi.postinst.chroot       users, masks the package's openhu.service (root, eglfs) until openhu#8
 mkosi.finalize              empty machine id (read-only /etc)
-scripts/                    build, fetch-debs, run-vm, ssh, screenshot, powerloss-test
+scripts/                    build, fetch-debs, run-vm, ssh, screenshot, powerloss-test, add-update, serve-updates
 host/                       udev rule for the development host
 ```
 
