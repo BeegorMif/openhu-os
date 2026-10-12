@@ -11,3 +11,5 @@ systemctl mask systemd-boot-random-seed.service
 # The splash stays until openhu-session takes the display over (plymouth quit --retain-splash); Plymouth's own quit
 # at the end of the boot would leave a black screen in between
 systemctl mask plymouth-quit.service plymouth-quit-wait.service
+# /etc is read-only: NetworkManager writes resolv.conf to /run
+ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf

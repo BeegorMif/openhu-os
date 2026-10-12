@@ -11,6 +11,12 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 - **Base:** Debian 13 "trixie" (minimal, no apt in the image: it is updated as a whole), built with
   [mkosi](https://github.com/systemd/mkosi)
 - **Boot:** UEFI, systemd-boot, unified kernel image; no boot messages, about 4 s to OpenHU in the VM
+- **Read-only root:** erofs (lz4hc, about 600 MB) in a fixed 3 GB slot labelled `openhu_<version>`; the unified kernel
+  image boots exactly that slot (`root=PARTLABEL=openhu_<version>`). `/etc` is part of it, the machine id is transient.
+- **Data partition:** `openhu-data` (ext4) on `/var`, created by systemd-repart on the first boot together with the
+  empty second root slot (`_empty`, for A/B updates), takes the rest of the disk. Everything that changes lives
+  there: OpenHU's settings and plugins, PipeWire state, NetworkManager connections, Bluetooth pairings. fsck repairs
+  it after a power cut.
 - **Display:** OpenHU in the [cage](https://github.com/cage-kiosk/cage) Wayland kiosk compositor on tty1
   (`openhu-session.service`), no desktop. Debian's Qt 6 has no eglfs.
 - **User:** `openhu` (UID 900), home `/var/lib/openhu` with `openhu.ini` and `~/.openhu` (plugins, logs)
@@ -22,8 +28,8 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
   with a real logo any time. `scripts/build.sh` packages the theme as `openhu-os-splash`.
 - **Small initrd:** only the modules mkosi's initrd needs (54 MB unified kernel image instead of 136 MB)
 
-Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): read-only root with a separate data
-partition, A/B updates with automatic rollback, CI releases, Raspberry Pi 4/5.
+Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): A/B updates with automatic rollback, CI
+releases, Raspberry Pi 4/5.
 
 ## Build
 
@@ -66,6 +72,17 @@ virtio GPU shows the pointer about 64 px too low, so every click seemed to land 
 
 The VM disk (`vm/disk.raw`, 16 GB sparse) keeps its data until `--fresh`.
 
+### Power cut test
+
+```bash
+scripts/powerloss-test.sh 10    # 10 power cuts, about 30 s each
+```
+
+Boots a second VM (`vm/powerloss/`, headless, no phone, ssh on port 2223; the dev VM may keep running) and kills
+QEMU at a random moment: first during the first boot (systemd-repart at work), then while OpenHU rewrites its plugin
+sources and a file writer syncs to `/var`. Before each cut it saves a volume and a plugin source; after each boot
+OpenHU must answer within 90 s with both still there, the official plugin source intact and no failed units.
+
 ### Android Auto in the VM (USB)
 
 Google's USB ids `18d1:4ee1`/`4ee2` (Pixel, Fairphone) and `18d1:2d00`/`2d01` (every phone in accessory mode) are
@@ -85,9 +102,12 @@ host first (e.g. the openhu dev container), they would grab the phone.
 ```
 mkosi.conf, mkosi.conf.d/   distribution, packages (base, session, openhu, kernel)
 mkosi.profiles/             dev and release
-mkosi.extra/                files in the image: session unit, sysusers, PAM, polkit, presets, journald, openhu-api
+mkosi.repart/               partitions of the image: ESP, root slot A (erofs)
+mkosi.extra/                files in the image: session unit, sysusers, PAM, polkit, presets, journald, openhu-api,
+                            first boot partitions (usr/lib/repart.d: slot B, data), fstab for /var
 mkosi.postinst.chroot       users, masks the package's openhu.service (root, eglfs) until openhu#8
-scripts/                    build, fetch-debs, run-vm, ssh, screenshot
+mkosi.finalize              empty machine id (read-only /etc)
+scripts/                    build, fetch-debs, run-vm, ssh, screenshot, powerloss-test
 host/                       udev rule for the development host
 ```
 
