@@ -3,7 +3,7 @@
 # restarts of the VM until --fresh.
 #
 #   scripts/run-vm.sh [--fresh] [--no-gl] [--res WxH] [--headless] [--phone VID:PID,...] [--ui gtk|x11|sdl]
-#                     [--instance NAME --ssh-port PORT] [--no-phone]
+#                     [--instance NAME --ssh-port PORT] [--no-phone] [--wifi]
 #
 #   --fresh     new disk from the newest image (and fresh UEFI variables)
 #   --image F   with --fresh: this image instead of the newest (e.g. an older version to test updates)
@@ -17,6 +17,8 @@
 #               Always passed through: 18d1:4ee1/4ee2 (Pixel, Fairphone) and 18d1:2d00/2d01 (every phone in
 #               accessory mode). The phone must not be in use on the host.
 #   --no-phone  no phone passthrough (a second VM next to the one with the phone)
+#   --wifi      a virtual WiFi card (mac80211_hwsim, wlan0) on every boot, through a kernel command line extra
+#               (SMBIOS, read by the UKI's systemd-stub); without it the VM has no WiFi like a PC without a card
 #   --instance  a second VM with its own disk, UEFI variables and QMP socket in vm/NAME/ (scripts/powerloss-test.sh);
 #               needs its own --ssh-port (scripts/ssh.sh: OPENHU_VM_SSH_PORT=PORT)
 #
@@ -30,7 +32,7 @@ OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
 # fixed: systemd derives the machine id from it in a VM
 VM_UUID=6f70656e-6875-4f53-8000-000000000001
-IMAGE=""; FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222
+IMAGE=""; FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222; WIFI=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -44,6 +46,7 @@ while [ $# -gt 0 ]; do
     --no-phone) PHONES=0; shift ;;
     --instance) VM="$VM/$2"; shift 2 ;;
     --ssh-port) SSH_PORT="$2"; shift 2 ;;
+    --wifi) WIFI=1; shift ;;
     *) echo "unknown option $1" >&2; exit 1 ;;
   esac
 done
@@ -91,12 +94,15 @@ fi
 audio=none
 [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pipewire-0" ] && audio=pipewire
 
+extra=()
+[ "$WIFI" = 1 ] && extra+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=modules_load=mac80211_hwsim mac80211_hwsim.radios=1")
+
 exec qemu-system-x86_64 -name openhu-os -nodefaults -machine q35,accel=kvm,vmport=off -cpu host -smp 4 -m 4096 -uuid "$VM_UUID" \
   -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
   -drive if=pflash,format=raw,unit=1,file="$VM/OVMF_VARS.fd" \
   -drive if=none,id=disk0,format=raw,file="$VM/disk.raw",cache=writeback,discard=unmap \
   -device virtio-blk-pci,drive=disk0,bootindex=1 \
-  "${display[@]}" "${usb[@]}" \
+  "${display[@]}" "${usb[@]}" "${extra[@]}" \
   -audiodev "$audio,id=snd0" -device intel-hda -device hda-duplex,audiodev=snd0 \
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22 -device virtio-net-pci,netdev=net0 \
   -device virtio-rng-pci \

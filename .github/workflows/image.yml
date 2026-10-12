@@ -93,5 +93,9 @@ jobs:
             echo
             echo "**Update** of a running OpenHU OS: \`openhu-update update --reboot\` (root partition and kernel"
             echo "image of this release, back to the version before if OpenHU does not come up)."
+            echo
+            echo "**Without internet:** copy \`SHA256SUMS\`, \`openhu-os_$VERSION.root.raw.gz\` and"
+            echo "\`openhu-os_$VERSION.efi\` to a USB stick (FAT32, exFAT, NTFS or ext4) and plug it in: OpenHU offers the"
+            echo "update (Settings → System)."
           } > notes.md
           gh release create "$GITHUB_REF_NAME" dist/* --title "OpenHU OS $VERSION" --notes-file notes.md

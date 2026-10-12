@@ -1,0 +1,46 @@
+#!/bin/sh
+# Mounts a USB stick read-only under /run/media/<name> (a power cut or pulling it never harms it) and tells
+# openhu-update to look for updates on it. Run by openhu-usb@<name>.service, started by udev.
+#   usb-stick mount|unmount NAME (sdb1)
+set -u
+action="$1"; name="$2"
+dir="/run/media/$name"
+
+case "$action" in
+mount)
+    device="/dev/$name"
+    # the system's own disk (booted from a USB disk): not a stick
+    disk=$(lsblk -no PKNAME "$device" 2>/dev/null | head -1); [ -n "$disk" ] || disk="$name"
+    root=$(findmnt -no SOURCE / | xargs -r lsblk -no PKNAME 2>/dev/null | head -1)
+    if [ -n "$root" ] && [ "$disk" = "$root" ]; then
+        echo "$device is on the system disk, not mounted"
+        exit 0
+    fi
+    type=$(blkid -o value -s TYPE "$device")
+    options=ro,nosuid,nodev,noexec
+    case "$type" in
+        # no owners on these file systems: the files belong to openhu (plugins, e.g. music from the stick)
+        vfat|exfat) options="$options,uid=$(id -u openhu),gid=$(id -g openhu),fmask=0133,dmask=0022" ;;
+        ntfs) type=ntfs3; options="$options,uid=$(id -u openhu),gid=$(id -g openhu),fmask=0133,dmask=0022" ;;
+        # read-only also for the journal: no replay (a stick with an unclean ext4 still mounts)
+        ext4|ext3|ext2) type=ext4; options="$options,noload" ;;
+    esac
+    mkdir -p "$dir"
+    if ! mount -t "$type" -o "$options" "$device" "$dir"; then
+        rmdir "$dir" 2>/dev/null
+        exit 1
+    fi
+    echo "$device ($type) mounted on $dir"
+    ;;
+unmount)
+    # lazy: the stick may already be gone
+    mountpoint -q "$dir" && umount -l "$dir"
+    rmdir "$dir" 2>/dev/null
+    ;;
+*)
+    echo "usage: usb-stick mount|unmount NAME" >&2
+    exit 2
+    ;;
+esac
+# OpenHU reads /run/openhu-os/usb-update.json
+/usr/libexec/openhu-os/openhu-update scan >/dev/null || true

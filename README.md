@@ -32,14 +32,17 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 - **A/B updates:** `openhu-update` writes a new version into the other root slot and its unified kernel image into
   the ESP with three boot tries (systemd-boot boot counting). The new version is kept when OpenHU comes up
   (`openhu-boot-check.service`, then `systemd-bless-boot`); after three failed tries systemd-boot boots the version
-  before again. A power cut during an update leaves the running version bootable. No automatic updates: only
-  `openhu-update update` (later a button in OpenHU, openhu#28) starts one.
+  before again. A power cut during an update leaves the running version bootable. No automatic updates: Install in
+  OpenHU (Settings → System) or `openhu-update update` starts one, online or from a USB stick.
   The splash says when a new version is being tried ("try 1 of 3") and when a failed update was rolled back;
   `/run/openhu-os/boot-status.json` has the same for OpenHU (`normal`, `trial`, `updated` once the new version
   passed its boot check, `rollback`).
 
-Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): update from the OpenHU settings
-([openhu#28](https://github.com/average-web-dev/openhu/issues/28)), signed checksums, Raspberry Pi 4/5.
+- **USB sticks:** mounted read-only under `/run/media/<name>` while plugged in (FAT32, exFAT, NTFS, ext4); a power cut
+  or pulling the stick never harms it. Updates from a stick, see below.
+
+Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): signed checksums
+([#21](https://github.com/average-web-dev/openhu-os/issues/21)), Raspberry Pi 4/5.
 
 ## ssh
 
@@ -83,6 +86,21 @@ clock. A Raspberry Pi 4 has none: after a power cut without internet it starts a
 (`xz -d`, then `dd` or balenaEtcher; grows to the whole disk on the first boot), the update for `openhu-update`
 (`openhu-os_<version>.root.raw.gz`, `openhu-os_<version>.efi`), the package manifest and `SHA256SUMS`.
 
+### Update from a USB stick
+
+A head unit usually has no internet. Copy the update files of a release to a USB stick on any computer:
+
+```
+SHA256SUMS
+openhu-os_<version>.root.raw.gz
+openhu-os_<version>.efi
+```
+
+into the stick's top folder or into `openhu-os/` (several versions: one folder each below `openhu-os/`, the newest
+wins). FAT32, exFAT, NTFS or ext4. Plug it in: OpenHU shows "OpenHU OS <version> on the USB stick – tap to install",
+Settings → System has the Install button. Leave the stick plugged in until the update is installed; pulled out
+earlier, the update stops and the running version stays.
+
 The workflow `.github/workflows/image.yml` runs on every push and pull request: newest OpenHU from its CI, dev image,
 three power cuts in a VM (KVM on the runner, no GPU: `--no-gl`), release image, which must show the OpenHU shell
 in a VM (`scripts/release-smoke-test.sh`, a screenshot check: ssh is off in a fresh release image). A tag `v<version>` (digits and dots,
@@ -122,7 +140,7 @@ scripts/screenshot.sh           # vm/screen.png (grim in the guest)
 `run-vm.sh` options: `--ui sdl|gtk|x11` (window, default SDL), `--headless` (no window; GL via egl-headless),
 `--no-gl` (no 3D: cage renders with pixman, Qt with llvmpipe, slow video; the QEMU window then lags one frame
 behind, the guest itself is fine), `--res WxH` (the GTK window reports its own size instead), `--phone VID:PID,...`
-(more phones to pass through, ids from `lsusb`).
+(more phones to pass through, ids from `lsusb`), `--wifi` (a virtual WiFi card, `mac80211_hwsim`, on every boot).
 
 The dev image lets cage draw the mouse cursor itself (`WLR_NO_HARDWARE_CURSORS=1`): the cursor plane of QEMU's
 virtio GPU shows the pointer about 64 px too low, so every click seemed to land above the cursor.
@@ -140,6 +158,14 @@ scripts/ssh.sh openhu-update update --reboot
 scripts/ssh.sh openhu-update status            # slots and boot entries: good, n tries left, failed
 ```
 
+A USB stick for the running VM (`--instance NAME` for a second VM):
+
+```bash
+scripts/add-update.sh 2026.10.13.1 /tmp/stick/openhu-os   # the update files of a version into a folder
+scripts/usb-stick.sh plug /tmp/stick                      # FAT32 image vm/stick.img from it, plugged in (--fs ext4)
+scripts/usb-stick.sh pull
+```
+
 `run-vm.sh --fresh --image mkosi.output/openhu-os_<version>.raw` starts from an older version. Debian has no
 `systemd-sysupdate`, so `openhu-update` (`/usr/libexec/openhu-os`, Python) does the job:
 
@@ -148,21 +174,28 @@ scripts/ssh.sh openhu-update status            # slots and boot entries: good, n
 3. writes `EFI/Linux/openhu-os_<version>+3.efi` (checked, then renamed)
 
 Release images use the newest GitHub release (`/usr/lib/openhu-os/update.conf`, override in
-`/var/lib/openhu-os/update.conf`). The download is checked against `SHA256SUMS` over HTTPS, not signed yet.
+`/var/lib/openhu-os/update.conf`). The download is checked against `SHA256SUMS` over HTTPS, not signed yet
+([#21](https://github.com/average-web-dev/openhu-os/issues/21)).
+
+USB sticks are a second source (`openhu-usb@<name>.service`, started by udev, mounts them and runs
+`openhu-update scan`). `check` and `update` take the newest version of both, the stick on a tie; without internet a
+stick is enough (`server_error` in `check --json`). A stick pulled during the update: error "the USB stick was
+removed", the slot is empty again.
 
 **For OpenHU** (the update button, [openhu#28](https://github.com/average-web-dev/openhu/issues/28)): the `openhu`
 user runs it with `pkexec` (polkit allows this program), every command answers in JSON with `--json`:
 
 ```bash
 pkexec /usr/libexec/openhu-os/openhu-update status --json   # running, other, entries (good/trying/failed), update, active
-pkexec /usr/libexec/openhu-os/openhu-update check --json    # {"current", "newest", "available"}
+pkexec /usr/libexec/openhu-os/openhu-update check --json    # {"current", "newest", "available", "source": "usb" | "online"}
 pkexec /usr/libexec/openhu-os/openhu-update start --json    # runs as openhu-update.service, survives OpenHU restarts
 pkexec /usr/libexec/openhu-os/openhu-update cancel --json   # the slot is empty again, the running version stays
 cat /run/openhu-os/update.json                              # progress, no root needed
+cat /run/openhu-os/usb-update.json                          # newest version on the sticks: {"current", "version", "newer", "path"}
 ```
 
 `update.json`: `{"state": "checking" | "installing" | "done" | "uptodate" | "error" | "cancelled", "from", "version",
-"phase": "root" | "kernel", "percent", "error"}` (percent over both, the root partition is 0–90). After `done`
+"source": "usb" | "online", "phase": "root" | "kernel", "percent", "error"}` (percent over both, the root partition is 0–90). After `done`
 OpenHU reboots through logind; after the reboot `/run/openhu-os/boot-status.json` says `updated` or, if the new version
 did not come up, `rollback`. Errors: exit code 1 and `{"error": "..."}`.
 
@@ -204,11 +237,11 @@ mkosi.profiles/             dev and release
 mkosi.repart/               partitions of the image: ESP, root slot A (erofs, also split out as the update)
 mkosi.extra/                files in the image: session unit, sysusers, PAM, polkit, presets, journald, openhu-api,
                             first boot partitions (usr/lib/repart.d: slot B, data), fstab for /var, openhu-update,
-                            boot check
+                            boot check, USB sticks (udev rule, openhu-usb@.service)
 mkosi.postinst.chroot       users, masks the package's openhu.service (root, eglfs) until openhu#8
 mkosi.finalize              empty machine id (read-only /etc)
 scripts/                    build, fetch-debs, run-vm, ssh, screenshot, powerloss-test, update-test, add-update,
-                            serve-updates, release
+                            serve-updates, release, usb-stick
 .github/workflows/image.yml CI: build, VM test, release on tags
 host/                       udev rule for the development host
 ```

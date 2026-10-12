@@ -1,0 +1,11 @@
+[Unit]
+Description=USB stick %I (read-only)
+# stops when the stick is pulled: unmounts it
+BindsTo=dev-%i.device
+After=dev-%i.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/openhu-os/usb-stick mount %I
+ExecStop=/usr/libexec/openhu-os/usb-stick unmount %I
