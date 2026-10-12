@@ -8,7 +8,8 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 
 ## What is in the image
 
-- **Base:** Debian 13 "trixie" (minimal, no apt in the image: it is updated as a whole), built with
+- **Base:** Debian 13 "trixie" (minimal, no apt in the image: it is updated as a whole; calls itself "OpenHU OS
+  <version>" in the boot menu and os-release, `ID=debian` stays), built with
   [mkosi](https://github.com/systemd/mkosi)
 - **Boot:** UEFI, systemd-boot, unified kernel image; no boot messages, about 4 s to OpenHU in the VM
 - **Read-only root:** erofs (lz4hc, about 600 MB) in a fixed 3 GB slot labelled `openhu_<version>`; the unified kernel
@@ -20,7 +21,7 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 - **Display:** OpenHU in the [cage](https://github.com/cage-kiosk/cage) Wayland kiosk compositor on tty1
   (`openhu-session.service`), no desktop. Debian's Qt 6 has no eglfs.
 - **User:** `openhu` (UID 900), home `/var/lib/openhu` with `openhu.ini` and `~/.openhu` (plugins, logs)
-- **Audio:** PipeWire as the `openhu` user (lingering), `pactl` works for OpenHU
+- **Audio:** PipeWire as the `openhu` user (lingering), realtime priority through rtkit, `pactl` works for OpenHU
 - **Network:** NetworkManager (also the wireless Android Auto hotspot), BlueZ
 - **Journal:** in RAM only (32 MB)
 - **Boot splash:** Plymouth with the OpenHU logo on the shell's background (`splash/`), from early in the initrd until

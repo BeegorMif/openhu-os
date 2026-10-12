@@ -19,3 +19,14 @@ rm -f /etc/ssh/ssh_host_*
 # ssh: root's password from the data partition (openhu-ssh password), before the image's own accounts
 sed -i 's|^@include common-auth|auth sufficient pam_pwdfile.so pwdfile=/var/lib/openhu-os/ssh/passwd\n@include common-auth|' /etc/pam.d/sshd
 grep -q pam_pwdfile /etc/pam.d/sshd
+# The system's name in the boot menu (systemd-boot reads it from the unified kernel image), at the login and in
+# hostnamectl. ID=debian and VERSION_ID stay for tools that check for Debian.
+debian="$(. /usr/lib/os-release && echo "Debian $VERSION_ID $VERSION_CODENAME")"
+sed -i -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"OpenHU OS $IMAGE_VERSION ($debian)\"|" \
+       -e 's|^NAME=.*|NAME="OpenHU OS"|' \
+       -e 's|^HOME_URL=.*|HOME_URL="https://github.com/average-web-dev/openhu-os"|' \
+       -e 's|^SUPPORT_URL=.*|SUPPORT_URL="https://github.com/average-web-dev/openhu-os"|' \
+       -e 's|^BUG_REPORT_URL=.*|BUG_REPORT_URL="https://github.com/average-web-dev/openhu-os/issues"|' \
+       /usr/lib/os-release
+printf 'OpenHU OS %s \\n \\l\n\n' "$IMAGE_VERSION" > /etc/issue
+printf 'OpenHU OS %s\n' "$IMAGE_VERSION" > /etc/issue.net
