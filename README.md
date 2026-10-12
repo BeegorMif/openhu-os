@@ -130,6 +130,22 @@ scripts/ssh.sh openhu-update status            # slots and boot entries: good, n
 Release images use the newest GitHub release (`/usr/lib/openhu-os/update.conf`, override in
 `/var/lib/openhu-os/update.conf`). The download is checked against `SHA256SUMS` over HTTPS, not signed yet.
 
+**For OpenHU** (the update button, [openhu#28](https://github.com/average-web-dev/openhu/issues/28)): the `openhu`
+user runs it with `pkexec` (polkit allows this program), every command answers in JSON with `--json`:
+
+```bash
+pkexec /usr/libexec/openhu-os/openhu-update status --json   # running, other, entries (good/trying/failed), update, active
+pkexec /usr/libexec/openhu-os/openhu-update check --json    # {"current", "newest", "available"}
+pkexec /usr/libexec/openhu-os/openhu-update start --json    # runs as openhu-update.service, survives OpenHU restarts
+pkexec /usr/libexec/openhu-os/openhu-update cancel --json   # the slot is empty again, the running version stays
+cat /run/openhu-os/update.json                              # progress, no root needed
+```
+
+`update.json`: `{"state": "checking" | "installing" | "done" | "uptodate" | "error" | "cancelled", "from", "version",
+"phase": "root" | "kernel", "percent", "error"}` (percent over both, the root partition is 0–90). After `done`
+OpenHU reboots through logind; after the reboot `/run/openhu-os/boot-status.json` says `updated` or, if the new version
+did not come up, `rollback`. Errors: exit code 1 and `{"error": "..."}`.
+
 `scripts/update-test.sh` runs the whole story in a second VM (`vm/updatetest/`, ssh 2224, update server 8071):
 builds versions 1, 2 and a broken 3 (OpenHU masked), updates 1 → 2 (setting kept, marked good), cuts the power
 while the next update writes the root partition (2 still boots, slot empty again) and installs 3 (three failed
