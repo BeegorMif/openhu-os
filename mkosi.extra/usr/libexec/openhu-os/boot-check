@@ -18,7 +18,11 @@ limit="$(duration $TIMEOUT)"
 start=$(date +%s)
 waited=0
 while [ $waited -lt $TIMEOUT ]; do
-  /usr/libexec/openhu-os/openhu-api system.ping >/dev/null 2>&1 && exit 0
+  if /usr/libexec/openhu-os/openhu-api system.ping >/dev/null 2>&1; then
+    # the new version stays (systemd-bless-boot follows): "updated" for OpenHU's notice
+    python3 -c 'import json, sys; p = "/run/openhu-os/boot-status.json"; s = json.load(open(p)); s["state"] = "updated"; json.dump(s, open(p, "w"))' 2>/dev/null
+    exit 0
+  fi
   plymouth display-message --text="$message ($(duration $waited) / $limit)" 2>/dev/null
   sleep 1
   waited=$(($(date +%s) - start))
