@@ -1,0 +1,28 @@
+#!/bin/sh
+# Login greeting (ssh, console), replaces Debian's uname line and /etc/motd: version, the last update, the most
+# useful commands. pam_motd runs it at every login.
+. /usr/lib/os-release
+printf '\n  %s\n\n' "$PRETTY_NAME"
+if [ -r /run/openhu-os/boot-status.json ]; then
+  python3 - /run/openhu-os/boot-status.json <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))
+message = {
+    "updated": f"Update auf {s.get('running')} installiert.",
+    "trial": f"Neue Version {s.get('running')} wird geprüft (Versuch {s.get('attempt')} von {s.get('tries')}).",
+    "rollback": f"Update auf {s.get('failed')} fehlgeschlagen, die vorherige Version läuft wieder.",
+}.get(s.get("state"))
+if message:
+    print(f"  {message}\n")
+PY
+fi
+cat <<'TEXT'
+  /      read-only (erofs), wird nur als Ganzes aktualisiert
+  /var   Daten: OpenHU in /var/lib/openhu, das Journal nur im RAM
+
+  openhu-update status | check | update     System-Update
+  journalctl -u openhu-session -f           Log von OpenHU
+  systemctl restart openhu-session          OpenHU neu starten
+  openhu-api system.methods                 WebSocket-API
+
+TEXT

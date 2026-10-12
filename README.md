@@ -56,6 +56,8 @@ pkexec /usr/libexec/openhu-os/openhu-ssh enable        # now and at every boot; 
 Everything is on the data partition (`/etc` is read-only): the switch `/var/lib/openhu-os/ssh/enabled`, the
 password hash (yescrypt) for `pam_pwdfile`, keys in `/var/lib/openhu-os/ssh/authorized_keys`, and the host keys,
 which every device creates on the first start of sshd. sshd listens on every network, the phone's hotspot too.
+After the login a greeting shows the version, the result of the last update and the most useful commands
+(`/etc/update-motd.d/10-openhu-os`).
 
 ## Releases
 
@@ -88,7 +90,7 @@ Profiles:
 |---|---|---|
 | ssh | always on: root with the key in `local/id_ed25519` (`scripts/ssh.sh`), password `openhu` | off until switched on in OpenHU (below) |
 | Console | serial (`ttyS0`), Ctrl+Alt+F2 switches away from cage | none |
-| Tools | `openhu-api`, `grim` (screenshots), strace, libinput-tools, … | none |
+| Tools | `grim` (screenshots), strace, libinput-tools, … | none (`openhu-api` and `openhu-update` in both) |
 
 ## Run in a VM
 

@@ -30,3 +30,5 @@ sed -i -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"OpenHU OS $IMAGE_VERSION ($debian)\"|
        /usr/lib/os-release
 printf 'OpenHU OS %s \\n \\l\n\n' "$IMAGE_VERSION" > /etc/issue
 printf 'OpenHU OS %s\n' "$IMAGE_VERSION" > /etc/issue.net
+# Login greeting: /etc/update-motd.d/10-openhu-os instead of Debian's uname line (/etc/motd is empty, mkosi.extra)
+rm -f /etc/update-motd.d/10-uname
