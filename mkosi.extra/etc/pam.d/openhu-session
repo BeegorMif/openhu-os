@@ -1,0 +1,6 @@
+# Session of openhu-session.service (PAMName=): no authentication, a logind session on seat0/tty1 so cage gets
+# the display and input devices.
+account  required pam_unix.so
+session  required pam_unix.so
+session  optional pam_loginuid.so
+session  required pam_systemd.so

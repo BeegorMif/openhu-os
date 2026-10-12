@@ -1,0 +1,5 @@
+# Host side, for scripts/run-vm.sh: lets QEMU (running as the logged-in user) pass Android phones through to the
+# OpenHU OS VM, also after the switch to accessory mode (new device node, 18d1:2d00/2d01).
+# Install: sudo cp host/70-openhu-os-vm.rules /etc/udev/rules.d/ && sudo udevadm control --reload
+# Add more vendors (lsusb) for phones that do not use Google's id, e.g. Samsung 04e8.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="18d1", TAG+="uaccess"

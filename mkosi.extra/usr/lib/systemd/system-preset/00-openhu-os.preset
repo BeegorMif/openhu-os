@@ -1,0 +1,7 @@
+# Everything not listed here stays disabled (mkosi runs systemctl preset-all)
+enable NetworkManager.service
+enable bluetooth.service
+enable systemd-timesyncd.service
+enable openhu-session.service
+enable fstrim.timer
+disable *

@@ -1,0 +1,12 @@
+// The openhu user controls NetworkManager (wireless Android Auto hotspot) and may reboot/power off.
+polkit.addRule(function(action, subject) {
+    if (subject.user != "openhu")
+        return polkit.Result.NOT_HANDLED;
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0)
+        return polkit.Result.YES;
+    if (action.id == "org.freedesktop.login1.reboot" || action.id == "org.freedesktop.login1.power-off"
+        || action.id == "org.freedesktop.login1.reboot-multiple-sessions"
+        || action.id == "org.freedesktop.login1.power-off-multiple-sessions")
+        return polkit.Result.YES;
+    return polkit.Result.NOT_HANDLED;
+});

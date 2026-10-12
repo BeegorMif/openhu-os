@@ -1,0 +1,8 @@
+#!/bin/sh
+# The openhu package's own unit runs as root with eglfs (openhu#8); openhu-session.service replaces it.
+set -e
+# users and their directories from mkosi.extra (sysusers.d, tmpfiles.d); systemd does not apply them at boot
+systemd-sysusers
+systemd-tmpfiles --create --prefix=/var/lib/openhu
+systemctl mask openhu.service
+systemctl set-default graphical.target
