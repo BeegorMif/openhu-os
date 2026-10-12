@@ -17,6 +17,10 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 - **Audio:** PipeWire as the `openhu` user (lingering), `pactl` works for OpenHU
 - **Network:** NetworkManager (also the wireless Android Auto hotspot), BlueZ
 - **Journal:** in RAM only (32 MB)
+- **Boot splash:** Plymouth with the OpenHU logo on the shell's background (`splash/`), from early in the initrd until
+  cage takes over the display. The images are rendered by `splash/make-images.sh`; replace `splash/theme/logo.png`
+  with a real logo any time. `scripts/build.sh` packages the theme as `openhu-os-splash`.
+- **Small initrd:** only the modules mkosi's initrd needs (54 MB unified kernel image instead of 136 MB)
 
 Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): read-only root with a separate data
 partition, A/B updates with automatic rollback, CI releases, Raspberry Pi 4/5.
