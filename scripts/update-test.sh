@@ -89,7 +89,8 @@ update_vm update --version "$V2" --reboot >/dev/null || true   # the ssh connect
 wait_version "$V2"
 wait_good "$V2"
 ssh_vm /usr/libexec/openhu-os/openhu-api volume.get | grep -q '"volume": 33' || fail "volume lost in the update"
-step "   runs, marked good, volume kept"
+ssh_vm cat /run/openhu-os/boot-status.json | grep -q '"state": "updated"' || fail "boot status not updated"
+step "   runs, marked good, boot status updated, volume kept"
 
 step "3. power cut while writing the root partition"
 ssh_vm "OPENHU_UPDATE_URL=http://10.0.2.2:$HTTP/ nohup openhu-update update --version $V3 > /run/update.log 2>&1 &"

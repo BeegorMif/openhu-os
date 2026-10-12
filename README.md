@@ -34,7 +34,8 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
   before again. A power cut during an update leaves the running version bootable. No automatic updates: only
   `openhu-update update` (later a button in OpenHU, openhu#28) starts one.
   The splash says when a new version is being tried ("Versuch 1 von 3") and when a failed update was rolled back;
-  `/run/openhu-os/boot-status.json` has the same for OpenHU (`normal`, `trial`, `rollback`).
+  `/run/openhu-os/boot-status.json` has the same for OpenHU (`normal`, `trial`, `updated` once the new version
+  passed its boot check, `rollback`).
 
 Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): update from the OpenHU settings
 ([openhu#28](https://github.com/average-web-dev/openhu/issues/28)), signed checksums, Raspberry Pi 4/5.

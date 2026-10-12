@@ -2,7 +2,8 @@
 """Boot status from systemd-boot's variables, shown on the splash and kept in /run/openhu-os/boot-status.json:
 
   normal    the newest good version
-  trial     a new version is being tried (openhu-update installed it with three tries), "try" of "tries"
+  trial     a new version is being tried (openhu-update installed it with three tries), "attempt" of "tries"
+  updated   the same after openhu-boot-check found OpenHU running: the new version stays
   rollback  a newer version failed three times, systemd-boot booted the version before ("failed")
 """
 import json
