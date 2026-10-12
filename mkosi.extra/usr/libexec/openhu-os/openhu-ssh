@@ -1,0 +1,98 @@
+#!/usr/bin/python3
+"""ssh switch of OpenHU OS, for the OpenHU settings (as the openhu user: pkexec /usr/libexec/openhu-os/openhu-ssh ...).
+
+  openhu-ssh status            {"enabled", "running", "password", "keys"} as JSON
+  openhu-ssh enable            switch sshd on (now and at every boot); needs a password or a key
+  openhu-ssh disable           switch sshd off
+  openhu-ssh password          root password for ssh, read from stdin (at least 8 characters)
+  openhu-ssh password --clear  remove it (login with a key only)
+
+Everything lives on the data partition (/etc is read-only): the switch /var/lib/openhu-os/ssh/enabled, the password
+hash (yescrypt) /var/lib/openhu-os/ssh/passwd for pam_pwdfile, keys in /var/lib/openhu-os/ssh/authorized_keys.
+"""
+import ctypes
+import json
+import os
+import subprocess
+import sys
+
+DIR = "/var/lib/openhu-os/ssh"
+FLAG = DIR + "/enabled"
+PASSWD = DIR + "/passwd"
+KEYS = DIR + "/authorized_keys"
+MIN_LENGTH = 8
+
+
+def fail(message):
+    print(json.dumps({"error": message}))
+    sys.exit(1)
+
+
+def has_keys():
+    try:
+        with open(KEYS) as f:
+            return any(line.strip() and not line.startswith("#") for line in f)
+    except FileNotFoundError:
+        return False
+
+
+def status():
+    running = subprocess.run(["systemctl", "is-active", "--quiet", "ssh.service"]).returncode == 0
+    return {"enabled": os.path.exists(FLAG), "running": running, "password": os.path.exists(PASSWD),
+            "keys": has_keys()}
+
+
+def hash_password(password):
+    libcrypt = ctypes.CDLL("libcrypt.so.1")
+    libcrypt.crypt_gensalt.restype = ctypes.c_char_p
+    libcrypt.crypt_gensalt.argtypes = [ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p, ctypes.c_int]
+    libcrypt.crypt.restype = ctypes.c_char_p
+    libcrypt.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    salt = libcrypt.crypt_gensalt(b"$y$", 0, None, 0)  # yescrypt, random salt from the kernel
+    hashed = libcrypt.crypt(password.encode(), salt) if salt else None
+    if not hashed or hashed.startswith(b"*"):
+        fail("hashing the password failed")
+    return hashed.decode()
+
+
+def write_private(path, text):
+    temp = path + ".new"
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.rename(temp, path)
+
+
+def main(args):
+    if os.geteuid() != 0:
+        fail("needs root (pkexec)")
+    os.makedirs(DIR, mode=0o755, exist_ok=True)
+    command = args[0] if args else "status"
+    if command == "status":
+        pass
+    elif command == "enable":
+        if not os.path.exists(PASSWD) and not has_keys():
+            fail("set a password first")
+        open(FLAG, "w").close()
+        subprocess.run(["systemctl", "start", "ssh.service"], check=True)
+    elif command == "disable":
+        if os.path.exists(FLAG):
+            os.remove(FLAG)
+        subprocess.run(["systemctl", "stop", "ssh.service"], check=True)
+    elif command == "password" and args[1:] == ["--clear"]:
+        if os.path.exists(PASSWD):
+            os.remove(PASSWD)
+    elif command == "password":
+        password = sys.stdin.readline().rstrip("\n")
+        if len(password) < MIN_LENGTH:
+            fail(f"the password needs at least {MIN_LENGTH} characters")
+        write_private(PASSWD, f"root:{hash_password(password)}\n")
+    else:
+        sys.exit(__doc__)
+    print(json.dumps(status()))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
