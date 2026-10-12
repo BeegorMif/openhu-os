@@ -52,9 +52,13 @@ scripts/ssh.sh openhu-api system.ping
 scripts/screenshot.sh           # vm/screen.png (grim in the guest)
 ```
 
-`run-vm.sh` options: `--headless` (no window; GL via egl-headless), `--no-gl` (no 3D: cage renders with pixman,
-Qt with llvmpipe, slow video; the QEMU window then lags one frame behind, the guest itself is fine), `--res WxH`
-(with a window QEMU reports the window size instead), `--phone VID:PID,...` (more phones to pass through, ids from `lsusb`).
+`run-vm.sh` options: `--ui sdl|gtk|x11` (window, default SDL), `--headless` (no window; GL via egl-headless),
+`--no-gl` (no 3D: cage renders with pixman, Qt with llvmpipe, slow video; the QEMU window then lags one frame
+behind, the guest itself is fine), `--res WxH` (the GTK window reports its own size instead), `--phone VID:PID,...`
+(more phones to pass through, ids from `lsusb`).
+
+The dev image lets cage draw the mouse cursor itself (`WLR_NO_HARDWARE_CURSORS=1`): the cursor plane of QEMU's
+virtio GPU shows the pointer about 64 px too low, so every click seemed to land above the cursor.
 The VM disk (`vm/disk.raw`, 16 GB sparse) keeps its data until `--fresh`.
 
 ### Android Auto in the VM (USB)

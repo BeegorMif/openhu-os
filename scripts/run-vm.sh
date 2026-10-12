@@ -2,12 +2,13 @@
 # Boots the newest image from mkosi.output in QEMU/KVM with UEFI. The VM disk is a copy in vm/, settings survive
 # restarts of the VM until --fresh.
 #
-#   scripts/run-vm.sh [--fresh] [--no-gl] [--res WxH] [--headless] [--phone VID:PID,...]
+#   scripts/run-vm.sh [--fresh] [--no-gl] [--res WxH] [--headless] [--phone VID:PID,...] [--ui gtk|x11|sdl]
 #
 #   --fresh     new disk from the newest image (and fresh UEFI variables)
 #   --no-gl     virtual GPU without 3D (cage/wlroots render with pixman, Qt with llvmpipe: slow video)
-#   --res       display size, default 1280x720. With a window, QEMU tells the guest the window size instead:
-#               resize the window, or use --headless
+#   --res       display size, default 1280x720 (the GTK window reports its own size instead)
+#   --ui UI     window: sdl (default), gtk or x11 (GTK through XWayland). The dev image draws the cursor in
+#               software: the virtio GPU's cursor plane shows it about 64 px too low.
 #   --headless  no window (CI); with GL (egl-headless) unless --no-gl. Screenshots: scripts/screenshot.sh
 #               (with a GL window QEMU has no image to read back)
 #   --phone IDS more phones to pass through, VID:PID in hex as lsusb shows them, comma separated (e.g. 04e8:6860).
@@ -24,7 +25,7 @@ OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
 # fixed: systemd derives the machine id from it in a VM
 VM_UUID=6f70656e-6875-4f53-8000-000000000001
-FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""
+FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -33,6 +34,7 @@ while [ $# -gt 0 ]; do
     --res) RES="$2"; shift 2 ;;
     --headless) HEADLESS=1; shift ;;
     --phone) PHONE="$2"; shift 2 ;;
+    --ui) UI="$2"; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 1 ;;
   esac
 done
@@ -53,10 +55,16 @@ if [ "$HEADLESS" = 1 ] && [ "$GL" = 1 ]; then
   display=(-device "virtio-vga-gl,xres=$xres,yres=$yres" -display egl-headless)
 elif [ "$HEADLESS" = 1 ]; then
   display=(-device "virtio-vga,xres=$xres,yres=$yres" -display none)
-elif [ "$GL" = 1 ]; then
-  display=(-device "virtio-vga-gl,xres=$xres,yres=$yres" -display gtk,gl=on,zoom-to-fit=off)
 else
-  display=(-device "virtio-vga,xres=$xres,yres=$yres" -display gtk,zoom-to-fit=off)
+  gpu=virtio-vga; [ "$GL" = 1 ] && gpu=virtio-vga-gl
+  case "$UI" in
+    gtk|x11) ui="gtk,zoom-to-fit=off" ;;
+    sdl) ui="sdl" ;;
+    *) echo "unknown --ui $UI" >&2; exit 1 ;;
+  esac
+  [ "$GL" = 1 ] && ui="$ui,gl=on"
+  [ "$UI" = x11 ] && export GDK_BACKEND=x11
+  display=(-device "$gpu,xres=$xres,yres=$yres" -display "$ui")
 fi
 
 # One passthrough slot per USB id the phone can have, none overlapping: Google's normal modes (MTP 4ee1, MTP+adb
@@ -68,7 +76,7 @@ for id in 18d1:2d00 18d1:2d01 18d1:4ee1 18d1:4ee2 ${PHONE//,/ }; do
   usb+=(-device "usb-host,bus=xhci.0,vendorid=0x${id%:*},productid=0x${id#*:}")
 done
 
-exec qemu-system-x86_64 -name openhu-os -machine q35,accel=kvm -cpu host -smp 4 -m 4096 -uuid "$VM_UUID" \
+exec qemu-system-x86_64 -name openhu-os -machine q35,accel=kvm,vmport=off -cpu host -smp 4 -m 4096 -uuid "$VM_UUID" \
   -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
   -drive if=pflash,format=raw,unit=1,file="$VM/OVMF_VARS.fd" \
   -drive if=none,id=disk0,format=raw,file="$VM/disk.raw",cache=writeback,discard=unmap \
