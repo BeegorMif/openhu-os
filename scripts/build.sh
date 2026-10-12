@@ -56,8 +56,8 @@ dpkg-deb --root-owner-group -Zxz -b "$stage" packages/ >/dev/null
 rm -rf "$stage"
 
 # ssh key of the dev VM (scripts/ssh.sh), generated once, only for root login in dev images
-[ -f local/id_ed25519 ] || ssh-keygen -q -t ed25519 -N "" -C "openhu-os dev VM" -f local/id_ed25519
 mkdir -p local/dev-extra/root/.ssh
+[ -f local/id_ed25519 ] || ssh-keygen -q -t ed25519 -N "" -C "openhu-os dev VM" -f local/id_ed25519
 cp local/id_ed25519.pub local/dev-extra/root/.ssh/authorized_keys
 chmod 700 local/dev-extra/root/.ssh
 chmod 600 local/dev-extra/root/.ssh/authorized_keys

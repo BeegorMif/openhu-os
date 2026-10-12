@@ -1,0 +1,87 @@
+# Builds the OpenHU OS images with the newest OpenHU from its CI, tests the dev image in a VM (KVM, power cuts) and
+# builds the release image. A tag v<version> (digits and dots, e.g. v2026.10.13) publishes it as a GitHub release:
+# the disk image to flash and the update that openhu-update installs (releases/latest/download/).
+name: Image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # the release of a tag
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version="$(date -u +%Y.%m.%d.%H%M)"; fi
+          case "$version" in
+            ""|*[!0-9.]*) echo "version '$version': digits and dots only (tag v2026.10.13)" >&2; exit 1 ;;
+          esac
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "OpenHU OS $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: QEMU and KVM
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 ovmf socat >/dev/null
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: OpenHU packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/fetch-debs.sh
+          ls packages | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build dev image
+        run: scripts/build.sh --profile dev --version "$VERSION"
+
+      # Boots, OpenHU answers, read-only root, data partition; three power cuts (without GPU: --no-gl)
+      - name: Test dev image
+        env:
+          OPENHU_VM_OPTS: --no-gl
+        run: scripts/powerloss-test.sh 3
+
+      - name: Serial console of the test VM
+        if: failure()
+        run: tail -n 150 vm/powerloss/serial.log || true
+
+      - name: Build release image
+        run: scripts/build.sh --profile release --version "$VERSION"
+
+      - name: Release files
+        run: |
+          scripts/release.sh "$VERSION" dist
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ls -lh dist >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Debian 13 \"trixie\" with OpenHU in the cage kiosk, x86_64 (UEFI). Packages:"
+            echo
+            ls packages | sed 's/^/- /'
+            echo
+            echo "**New installation:** \`xz -d openhu-os_$VERSION.raw.xz\`, write it to the disk or SD card"
+            echo "(\`dd\`, balenaEtcher). It grows to the whole disk on the first boot."
+            echo
+            echo "**Update** of a running OpenHU OS: \`openhu-update update --reboot\` (root partition and kernel"
+            echo "image of this release, back to the version before if OpenHU does not come up)."
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "OpenHU OS $VERSION" --notes-file notes.md

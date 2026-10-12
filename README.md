@@ -4,7 +4,7 @@ Minimal Linux images for [OpenHU](https://github.com/average-web-dev/openhu), th
 Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 
 > [!NOTE]
-> Work in progress: there is an x86_64 image for development in a VM. No releases yet, Raspberry Pi later.
+> Work in progress: x86_64 (UEFI) images, developed in a VM. Raspberry Pi later.
 
 ## What is in the image
 
@@ -36,8 +36,18 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
   The splash says when a new version is being tried ("Versuch 1 von 3") and when a failed update was rolled back;
   `/run/openhu-os/boot-status.json` has the same for OpenHU (`normal`, `trial`, `rollback`).
 
-Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): CI releases and an update server, update
-from the OpenHU settings, Raspberry Pi 4/5.
+Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): update from the OpenHU settings
+([openhu#28](https://github.com/average-web-dev/openhu/issues/28)), signed checksums, Raspberry Pi 4/5.
+
+## Releases
+
+[GitHub releases](https://github.com/average-web-dev/openhu-os/releases): `openhu-os_<version>.raw.xz` to flash
+(`xz -d`, then `dd` or balenaEtcher; grows to the whole disk on the first boot), the update for `openhu-update`
+(`openhu-os_<version>.root.raw.gz`, `openhu-os_<version>.efi`), the package manifest and `SHA256SUMS`.
+
+The workflow `.github/workflows/image.yml` runs on every push and pull request: newest OpenHU from its CI, dev image,
+three power cuts in a VM (KVM on the runner, no GPU: `--no-gl`), release image. A tag `v<version>` (digits and dots,
+e.g. `v2026.10.13`) publishes the release; release images update from `releases/latest/download/`.
 
 ## Build
 
@@ -98,8 +108,8 @@ scripts/ssh.sh openhu-update status            # slots and boot entries: good, n
 2. streams `openhu-os_<version>.root.raw.gz` into the slot, checks the SHA-256, labels it `openhu_<version>`
 3. writes `EFI/Linux/openhu-os_<version>+3.efi` (checked, then renamed)
 
-The release image's update server is still empty (`/usr/lib/openhu-os/update.conf`, override in
-`/var/lib/openhu-os/update.conf`); releases with signed checksums come with CI.
+Release images use the newest GitHub release (`/usr/lib/openhu-os/update.conf`, override in
+`/var/lib/openhu-os/update.conf`). The download is checked against `SHA256SUMS` over HTTPS, not signed yet.
 
 `scripts/update-test.sh` runs the whole story in a second VM (`vm/updatetest/`, ssh 2224, update server 8071):
 builds versions 1, 2 and a broken 3 (OpenHU masked), updates 1 → 2 (setting kept, marked good), cuts the power
@@ -142,7 +152,9 @@ mkosi.extra/                files in the image: session unit, sysusers, PAM, pol
                             boot check
 mkosi.postinst.chroot       users, masks the package's openhu.service (root, eglfs) until openhu#8
 mkosi.finalize              empty machine id (read-only /etc)
-scripts/                    build, fetch-debs, run-vm, ssh, screenshot, powerloss-test, add-update, serve-updates
+scripts/                    build, fetch-debs, run-vm, ssh, screenshot, powerloss-test, update-test, add-update,
+                            serve-updates, release
+.github/workflows/image.yml CI: build, VM test, release on tags
 host/                       udev rule for the development host
 ```
 

@@ -17,6 +17,7 @@
 # a disk without a volatile write cache. Lost are the guest's own caches and the writes in flight.
 # On a failure the VM disk stays in vm/powerloss/ (OPENHU_VM_SSH_PORT=2223 scripts/ssh.sh after a restart with
 # scripts/run-vm.sh --instance powerloss --ssh-port 2223 --headless --no-phone).
+# OPENHU_VM_OPTS: more run-vm.sh options, e.g. --no-gl on a host without GPU (CI)
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,7 +31,7 @@ QEMU=""
 ssh_vm() { OPENHU_VM_SSH_PORT=$PORT "$REPO/scripts/ssh.sh" -o ConnectTimeout=2 "$@"; }
 
 start_vm() {
-  "$REPO/scripts/run-vm.sh" --instance "$NAME" --ssh-port "$PORT" --headless --no-phone "$@" </dev/null >>"$LOG" 2>&1 &
+  "$REPO/scripts/run-vm.sh" --instance "$NAME" --ssh-port "$PORT" --headless --no-phone ${OPENHU_VM_OPTS:-} "$@" </dev/null >>"$LOG" 2>&1 &
   QEMU=$!   # run-vm.sh execs QEMU
 }
 

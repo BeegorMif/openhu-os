@@ -9,6 +9,7 @@
 #                                         without them the three images are built first (about 5 minutes)
 #
 # A broken version: scripts/build.sh --version V3 --kernel-command-line=systemd.mask=openhu-session.service
+# OPENHU_VM_OPTS: more run-vm.sh options, e.g. --no-gl on a host without GPU (CI)
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,7 +37,7 @@ step() { echo "$(date +%T) $*"; }
 fail() { echo "FAIL: $*" >&2; ssh_vm openhu-update status >&2 || true; exit 1; }
 
 start_vm() {
-  "$REPO/scripts/run-vm.sh" --instance "$NAME" --ssh-port "$PORT" --headless --no-phone "$@" </dev/null >>"$LOG" 2>&1 &
+  "$REPO/scripts/run-vm.sh" --instance "$NAME" --ssh-port "$PORT" --headless --no-phone ${OPENHU_VM_OPTS:-} "$@" </dev/null >>"$LOG" 2>&1 &
   QEMU=$!
 }
 
