@@ -59,6 +59,24 @@ which every device creates on the first start of sshd. sshd listens on every net
 After the login a greeting shows the version, the result of the last update and the most useful commands
 (`/etc/update-motd.d/10-openhu-os`).
 
+## Time zone, date and time
+
+Set in OpenHU (Settings → System, [openhu#36](https://github.com/average-web-dev/openhu/issues/36)) through
+`openhu-time`, the same way as ssh:
+
+```bash
+pkexec /usr/libexec/openhu-os/openhu-time status              # {"zone", "ntp", "synchronized", "time"}
+pkexec /usr/libexec/openhu-os/openhu-time zone Europe/Berlin  # applies at once, also to running programs
+pkexec /usr/libexec/openhu-os/openhu-time ntp off             # time from the internet (systemd-timesyncd) off
+pkexec /usr/libexec/openhu-os/openhu-time set 1791820800      # seconds since 1970 (UTC), only with ntp off
+```
+
+`/etc/localtime` links to `/var/lib/openhu-os/time/localtime`, which links to the zone (UTC until one is
+chosen). glibc and Qt follow both links; `timedatectl` does not and shows the zone as "n/a", `date` and
+`openhu-time status` show it right. Time from the internet is on by default; switched off, the flag
+`/var/lib/openhu-os/time/ntp-off` keeps systemd-timesyncd from starting. Setting the time also sets the hardware
+clock. A Raspberry Pi 4 has none: after a power cut without internet it starts at the last time systemd saved.
+
 ## Releases
 
 [GitHub releases](https://github.com/average-web-dev/openhu-os/releases): `openhu-os_<version>.raw.xz` to flash

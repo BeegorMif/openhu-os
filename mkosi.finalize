@@ -3,3 +3,6 @@
 # instead of trying to write one on the first boot.
 set -e
 : > "$BUILDROOT/etc/machine-id"
+# The time zone is chosen in OpenHU (openhu-time) and lives on the data partition; tmpfiles creates the default
+ln -sfn ../var/lib/openhu-os/time/localtime "$BUILDROOT/etc/localtime"
+rm -f "$BUILDROOT/etc/timezone"

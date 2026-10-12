@@ -1,0 +1,105 @@
+#!/usr/bin/python3
+"""Time zone, date and time of OpenHU OS, for the OpenHU settings (as the openhu user:
+pkexec /usr/libexec/openhu-os/openhu-time ...).
+
+  openhu-time status             {"zone", "ntp", "synchronized", "time"} as JSON
+  openhu-time zone Europe/Berlin set the time zone (applies at once, also to running programs)
+  openhu-time ntp on|off         time from the internet (systemd-timesyncd) on or off
+  openhu-time set 1791820800     set the clock (seconds since 1970, UTC) and the hardware clock; only with ntp off
+
+/etc is read-only: /etc/localtime links to /var/lib/openhu-os/time/localtime, which links to the zone in
+/usr/share/zoneinfo (tmpfiles: UTC until one is chosen). "ntp off" is the file
+/var/lib/openhu-os/time/ntp-off, a condition of systemd-timesyncd (systemd-timesyncd.service.d/openhu-os.conf).
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+DIR = "/var/lib/openhu-os/time"
+LINK = DIR + "/localtime"
+NTP_OFF = DIR + "/ntp-off"
+ZONEINFO = "/usr/share/zoneinfo/"
+SYNCHRONIZED = "/run/systemd/timesync/synchronized"
+ZONE_NAME = re.compile(r"^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$")
+# 2000-01-01 to 2100-01-01: a typo, not a date
+EARLIEST, LATEST = 946684800, 4102444800
+
+
+def fail(message):
+    print(json.dumps({"error": message}))
+    sys.exit(1)
+
+
+def status():
+    try:
+        target = os.readlink(LINK)
+        zone = target[len(ZONEINFO):] if target.startswith(ZONEINFO) else ""
+    except OSError:
+        zone = ""
+    return {"zone": zone, "ntp": not os.path.exists(NTP_OFF), "synchronized": os.path.exists(SYNCHRONIZED),
+            "time": int(time.time())}
+
+
+def set_zone(zone):
+    path = os.path.realpath(ZONEINFO + zone)
+    if not ZONE_NAME.match(zone) or not path.startswith(ZONEINFO) or not os.path.isfile(path):
+        fail(f"unknown time zone {zone}")
+    with open(path, "rb") as f:
+        if f.read(4) != b"TZif":
+            fail(f"unknown time zone {zone}")
+    # replaced in one step: programs never see the link missing
+    temp = LINK + ".new"
+    if os.path.lexists(temp):
+        os.remove(temp)
+    os.symlink(ZONEINFO + zone, temp)
+    os.rename(temp, LINK)
+
+
+def set_ntp(on):
+    if on:
+        if os.path.exists(NTP_OFF):
+            os.remove(NTP_OFF)
+        subprocess.run(["systemctl", "start", "systemd-timesyncd.service"], check=True)
+    else:
+        open(NTP_OFF, "w").close()
+        subprocess.run(["systemctl", "stop", "systemd-timesyncd.service"], check=True)
+
+
+def set_time(value):
+    if not os.path.exists(NTP_OFF):
+        fail("switch the time from the internet off first")
+    try:
+        seconds = int(value)
+    except ValueError:
+        fail(f"not a time: {value}")
+    if not EARLIEST <= seconds < LATEST:
+        fail(f"not a plausible time: {value}")
+    # timedated also writes the hardware clock
+    result = subprocess.run(["timedatectl", "set-time", f"@{seconds}"], capture_output=True, text=True)
+    if result.returncode != 0:
+        fail(result.stderr.strip() or "setting the time failed")
+
+
+def main(args):
+    if os.geteuid() != 0:
+        fail("needs root (pkexec)")
+    os.makedirs(DIR, mode=0o755, exist_ok=True)
+    command = args[0] if args else "status"
+    if command == "status":
+        pass
+    elif command == "zone" and len(args) == 2:
+        set_zone(args[1])
+    elif command == "ntp" and len(args) == 2 and args[1] in ("on", "off"):
+        set_ntp(args[1] == "on")
+    elif command == "set" and len(args) == 2:
+        set_time(args[1])
+    else:
+        sys.exit(__doc__)
+    print(json.dumps(status()))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
