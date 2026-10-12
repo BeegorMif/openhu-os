@@ -20,6 +20,7 @@ DIR = "/var/lib/openhu-os/ssh"
 FLAG = DIR + "/enabled"
 PASSWD = DIR + "/passwd"
 KEYS = DIR + "/authorized_keys"
+DEV_KEYS = "/root/.ssh/authorized_keys"  # built into the dev image only
 MIN_LENGTH = 8
 
 
@@ -80,7 +81,9 @@ def main(args):
     elif command == "disable":
         if os.path.exists(FLAG):
             os.remove(FLAG)
-        subprocess.run(["systemctl", "stop", "ssh.service"], check=True)
+        # the dev image always runs sshd with the developer's key (scripts/ssh.sh): only the switch goes off
+        if not os.path.exists(DEV_KEYS):
+            subprocess.run(["systemctl", "stop", "ssh.service"], check=True)
     elif command == "password" and args[1:] == ["--clear"]:
         if os.path.exists(PASSWD):
             os.remove(PASSWD)
