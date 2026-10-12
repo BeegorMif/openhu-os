@@ -1,0 +1,4 @@
+enable pipewire.socket
+enable pipewire-pulse.socket
+enable wireplumber.service
+disable *

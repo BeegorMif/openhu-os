@@ -1,0 +1,37 @@
+# OpenHU in the cage kiosk compositor on tty1. Replaces openhu.service of the openhu package (masked in the image).
+[Unit]
+Description=OpenHU kiosk session (cage + autoapp)
+Wants=dbus.socket systemd-logind.service
+After=dbus.socket systemd-logind.service systemd-user-sessions.service getty@tty1.service
+After=NetworkManager.service bluetooth.service
+Conflicts=getty@tty1.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=openhu
+PAMName=openhu-session
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+StateDirectory=openhu
+WorkingDirectory=/var/lib/openhu
+Environment=XDG_SESSION_TYPE=wayland XDG_SESSION_CLASS=user
+Environment=QT_QPA_PLATFORM=wayland QT_WAYLAND_DISABLE_WINDOWDECORATION=1
+Environment=XKB_DEFAULT_LAYOUT=de
+# Debugging knobs (e.g. WLR_RENDERER=pixman, QT_LOGGING_RULES=...), one VAR=value per line
+EnvironmentFile=-/var/lib/openhu/session.env
+# "iw reg set" for the hotspot country runs in a child process of autoapp
+AmbientCapabilities=CAP_NET_ADMIN
+ExecStart=/usr/bin/cage -d -- /usr/bin/autoapp
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target
