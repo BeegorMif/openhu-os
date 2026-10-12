@@ -1,0 +1,5 @@
+#!/bin/sh
+# /etc is read-only: an empty machine-id makes systemd use a transient one (in a VM derived from the firmware UUID)
+# instead of trying to write one on the first boot.
+set -e
+: > "$BUILDROOT/etc/machine-id"

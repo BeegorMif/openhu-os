@@ -3,6 +3,7 @@
 # restarts of the VM until --fresh.
 #
 #   scripts/run-vm.sh [--fresh] [--no-gl] [--res WxH] [--headless] [--phone VID:PID,...] [--ui gtk|x11|sdl]
+#                     [--instance NAME --ssh-port PORT] [--no-phone]
 #
 #   --fresh     new disk from the newest image (and fresh UEFI variables)
 #   --no-gl     virtual GPU without 3D (cage/wlroots render with pixman, Qt with llvmpipe: slow video)
@@ -14,6 +15,9 @@
 #   --phone IDS more phones to pass through, VID:PID in hex as lsusb shows them, comma separated (e.g. 04e8:6860).
 #               Always passed through: 18d1:4ee1/4ee2 (Pixel, Fairphone) and 18d1:2d00/2d01 (every phone in
 #               accessory mode). The phone must not be in use on the host.
+#   --no-phone  no phone passthrough (a second VM next to the one with the phone)
+#   --instance  a second VM with its own disk, UEFI variables and QMP socket in vm/NAME/ (scripts/powerloss-test.sh);
+#               needs its own --ssh-port (scripts/ssh.sh: OPENHU_VM_SSH_PORT=PORT)
 #
 # ssh: scripts/ssh.sh (port 2222), screenshot: scripts/screenshot.sh. Serial console on this terminal (Ctrl+A X
 # quits QEMU).
@@ -25,7 +29,7 @@ OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
 # fixed: systemd derives the machine id from it in a VM
 VM_UUID=6f70656e-6875-4f53-8000-000000000001
-FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl
+FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -35,6 +39,9 @@ while [ $# -gt 0 ]; do
     --headless) HEADLESS=1; shift ;;
     --phone) PHONE="$2"; shift 2 ;;
     --ui) UI="$2"; shift 2 ;;
+    --no-phone) PHONES=0; shift ;;
+    --instance) VM="$VM/$2"; shift 2 ;;
+    --ssh-port) SSH_PORT="$2"; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 1 ;;
   esac
 done
@@ -72,9 +79,11 @@ fi
 # does not tell the guest that the phone came back as another device; with overlapping slots it moves the phone
 # between them and the Android Auto session breaks.
 usb=(-device qemu-xhci,id=xhci,p2=8,p3=8 -device usb-tablet,bus=xhci.0 -device usb-kbd,bus=xhci.0)
-for id in 18d1:2d00 18d1:2d01 18d1:4ee1 18d1:4ee2 ${PHONE//,/ }; do
-  usb+=(-device "usb-host,bus=xhci.0,vendorid=0x${id%:*},productid=0x${id#*:}")
-done
+if [ "$PHONES" = 1 ]; then
+  for id in 18d1:2d00 18d1:2d01 18d1:4ee1 18d1:4ee2 ${PHONE//,/ }; do
+    usb+=(-device "usb-host,bus=xhci.0,vendorid=0x${id%:*},productid=0x${id#*:}")
+  done
+fi
 
 exec qemu-system-x86_64 -name openhu-os -nodefaults -machine q35,accel=kvm,vmport=off -cpu host -smp 4 -m 4096 -uuid "$VM_UUID" \
   -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
@@ -83,7 +92,7 @@ exec qemu-system-x86_64 -name openhu-os -nodefaults -machine q35,accel=kvm,vmpor
   -device virtio-blk-pci,drive=disk0,bootindex=1 \
   "${display[@]}" "${usb[@]}" \
   -audiodev pipewire,id=snd0 -device intel-hda -device hda-duplex,audiodev=snd0 \
-  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 \
+  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22 -device virtio-net-pci,netdev=net0 \
   -device virtio-rng-pci \
   -qmp unix:"$VM/qmp.sock",server=on,wait=off \
   -pidfile "$VM/qemu.pid" -serial mon:stdio
