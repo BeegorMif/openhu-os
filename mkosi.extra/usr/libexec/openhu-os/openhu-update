@@ -1,9 +1,15 @@
 #!/usr/bin/python3
 """A/B update of OpenHU OS.
 
-  openhu-update [status]                       running version, both root slots, boot entries
-  openhu-update check                          newest version on the update server
-  openhu-update update [--version V] [--reboot]
+  openhu-update [status] [--json]               running version, both root slots, boot entries, update state
+  openhu-update check [--json]                  newest version on the update server
+  openhu-update update [--version V] [--reboot] install in the foreground (console)
+  openhu-update start [--version V] [--json]    install in the background as openhu-update.service (OpenHU)
+  openhu-update cancel [--json]                 stop the background update; the running version stays
+
+OpenHU runs it as the openhu user with pkexec (polkit allows this program). The state of an update is in
+/run/openhu-os/update.json, readable without root: {"state": "checking" | "installing" | "done" | "uptodate" |
+"error" | "cancelled", "from", "version", "phase": "root" | "kernel", "percent" (0-100 over both), "error"}.
 
 The update server is a directory with SHA256SUMS, openhu-os_<version>.root.raw.gz (root partition) and
 openhu-os_<version>.efi (unified kernel image), see scripts/add-update.sh. Its URL: OPENHU_UPDATE_URL, else URL= in
@@ -23,6 +29,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import urllib.error
@@ -41,11 +48,46 @@ ROOT_TYPES = {
 CONFIGS = ["/var/lib/openhu-os/update.conf", "/usr/lib/openhu-os/update.conf"]
 LOADER_GUID = "4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
 CHUNK = 1 << 20
+STATE = "/run/openhu-os/update.json"
+UNIT = "openhu-update.service"
+# share of the root partition in the overall percent (it is about 90 % of the download)
+ROOT_SHARE = 90
+
+JSON = False
+
+
+class UpdateError(Exception):
+    pass
+
+
+class Cancelled(Exception):
+    pass
 
 
 def fail(message):
-    print(f"openhu-update: {message}", file=sys.stderr)
-    sys.exit(1)
+    raise UpdateError(message)
+
+
+def report(**fields):
+    """Writes the update state for OpenHU (atomically, readable by everyone)"""
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    temp = STATE + ".new"
+    with open(temp, "w") as f:
+        json.dump(fields, f)
+    os.chmod(temp, 0o644)
+    os.rename(temp, STATE)
+
+
+def read_state():
+    try:
+        with open(STATE) as f:
+            return json.load(f)
+    except (FileNotFoundError, ValueError):
+        return {"state": "idle"}
+
+
+def output(data, text):
+    print(json.dumps(data) if JSON else text)
 
 
 def version_key(version):
@@ -172,16 +214,22 @@ def available(base):
 
 
 class Progress:
-    def __init__(self, what, total):
-        self.what, self.total, self.done, self.shown = what, total, 0, -1
+    """Prints every 10 % and writes every 1 % of the overall progress to the state file"""
+
+    def __init__(self, phase, total, start, share, fields):
+        self.phase, self.total, self.start, self.share, self.fields = phase, total, start, share, fields
+        self.done, self.shown = 0, -1
 
     def add(self, n):
         self.done += n
-        if self.total:
-            percent = self.done * 100 // self.total
-            if percent // 10 != self.shown // 10:
-                print(f"  {self.what}: {percent} %", flush=True)
-                self.shown = percent
+        if not self.total:
+            return
+        percent = self.start + min(self.done, self.total) * self.share // self.total
+        if percent != self.shown:
+            if percent // 10 != self.shown // 10 and not JSON:
+                print(f"  {percent} %", flush=True)
+            self.shown = percent
+            report(**self.fields, state="installing", phase=self.phase, percent=percent)
 
 
 class HashingReader:
@@ -197,9 +245,10 @@ class HashingReader:
         return data
 
 
-def write_root(url, sha256, device, size):
+def write_root(url, sha256, device, size, fields):
     with fetch(url) as response:
-        reader = HashingReader(response, Progress("root partition", int(response.headers.get("Content-Length") or 0)))
+        total = int(response.headers.get("Content-Length") or 0)
+        reader = HashingReader(response, Progress("root", total, 0, ROOT_SHARE, fields))
         fd = os.open(device, os.O_WRONLY | os.O_CLOEXEC)
         try:
             written = 0
@@ -218,11 +267,12 @@ def write_root(url, sha256, device, size):
         fail("root partition: checksum mismatch, the slot stays empty")
 
 
-def write_uki(url, sha256, version):
+def write_uki(url, sha256, version, fields):
     temp = os.path.join(UKI_DIR, f".{IMAGE_ID}_{version}.efi.part")
     sha = hashlib.sha256()
     with fetch(url) as response, open(temp, "wb") as f:
-        progress = Progress("kernel image", int(response.headers.get("Content-Length") or 0))
+        total = int(response.headers.get("Content-Length") or 0)
+        progress = Progress("kernel", total, ROOT_SHARE, 100 - ROOT_SHARE, fields)
         while chunk := response.read(CHUNK):
             sha.update(chunk)
             f.write(chunk)
@@ -239,23 +289,59 @@ def write_uki(url, sha256, version):
 
 # --- commands ---
 
+def unit_active():
+    return subprocess.run(["systemctl", "is-active", "--quiet", UNIT]).returncode == 0
+
+
 def status():
     running, other, _ = slots()
-    print(f"running:    {running_version()} ({running['path']}, boot entry {efi_var('LoaderEntrySelected')})")
-    print(f"other slot: {slot_version(other) or 'empty'} ({other['path']})")
+    entries = []
     for name, (version, left) in boot_entries().items():
-        state = "good" if left is None else (f"{left} tries left" if left > 0 else "failed")
-        print(f"  {name}: {state}")
+        entries.append({"file": name, "version": version,
+                        "state": "good" if left is None else ("trying" if left > 0 else "failed"), "tries_left": left})
+    state = read_state()
+    if state.get("state") in ("checking", "installing") and not unit_active():
+        state = {"state": "idle"}  # left over from an update that ended with the power
+    data = {"running": running_version(), "slot": running["path"], "other": slot_version(other),
+            "other_slot": other["path"], "entries": entries, "update": state, "active": unit_active()}
+    lines = [f"running:    {data['running']} ({running['path']}, boot entry {efi_var('LoaderEntrySelected')})",
+             f"other slot: {data['other'] or 'empty'} ({other['path']})"]
+    for entry in entries:
+        left = entry["tries_left"]
+        lines.append(f"  {entry['file']}: " + ("good" if left is None else f"{left} tries left" if left else "failed"))
+    if data["active"] or state.get("state") not in (None, "idle"):
+        lines.append(f"update: {json.dumps(state)}")
+    output(data, "\n".join(lines))
 
 
 def check():
     current = running_version()
     versions = available(server_url())
     newest = max(versions, key=version_key, default=None)
-    if newest and version_key(newest) > version_key(current):
-        print(f"update available: {current} -> {newest}")
-    else:
-        print(f"up to date: {current}")
+    newer = bool(newest) and version_key(newest) > version_key(current)
+    output({"current": current, "newest": newest, "available": newer},
+           f"update available: {current} -> {newest}" if newer else f"up to date: {current}")
+
+
+def start(version=None):
+    if unit_active():
+        fail("an update is already running")
+    report(state="checking", **({"version": version} if version else {}))
+    command = ["systemd-run", f"--unit={UNIT}", "--collect", "--quiet", "--description=OpenHU OS update"]
+    if os.environ.get("OPENHU_UPDATE_URL"):  # the service does not inherit the environment
+        command.append(f"--setenv=OPENHU_UPDATE_URL={os.environ['OPENHU_UPDATE_URL']}")
+    command += ["/usr/libexec/openhu-os/openhu-update", "update"] + (["--version", version] if version else [])
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        report(state="error", error=result.stderr.strip())
+        fail(f"systemd-run: {result.stderr.strip()}")
+    output({"started": True}, f"update started ({UNIT}), progress: {STATE}")
+
+
+def cancel():
+    was_active = unit_active()
+    subprocess.run(["systemctl", "stop", UNIT], check=False)
+    output({"cancelled": was_active}, "update cancelled" if was_active else "no update running")
 
 
 def update(version=None, reboot=False):
@@ -265,13 +351,19 @@ def update(version=None, reboot=False):
     except BlockingIOError:
         fail("another update is running")
 
+    def on_term(signum, frame):
+        raise Cancelled()
+    signal.signal(signal.SIGTERM, on_term)
+
+    report(state="checking")
     current = running_version()
     base = server_url()
     versions = available(base)
     if version is None:
         version = max(versions, key=version_key, default=None)
         if version is None or version_key(version) <= version_key(current):
-            print(f"up to date: {current}")
+            report(state="uptodate", version=current)
+            output({"state": "uptodate", "version": current}, f"up to date: {current}")
             return
     if version not in versions:
         fail(f"version {version} is not on {base}")
@@ -281,45 +373,98 @@ def update(version=None, reboot=False):
     running, other, disk = slots()
     if not os.path.isdir(UKI_DIR):
         fail(f"{UKI_DIR} not found (ESP not mounted?)")
-    print(f"update {current} -> {version} into {other['path']}")
+    fields = {"from": current, "version": version}
+    report(**fields, state="installing", phase="root", percent=0)
+    if not JSON:
+        print(f"update {current} -> {version} into {other['path']}")
 
-    # 1. the other slot's version can no longer boot, then its slot is free
-    old = slot_version(other)
-    if old:
-        remove_entries(old)
-    set_label(disk, other, EMPTY_LABEL)
-
-    # 2. root partition, labelled only once it is complete
     files = versions[version]
-    write_root(urllib.parse.urljoin(base, f"{IMAGE_ID}_{version}.root.raw.gz"),
-               files[f"{IMAGE_ID}_{version}.root.raw.gz"], other["path"], other["size"])
-    set_label(disk, other, SLOT_PREFIX + version)
+    labelled = False
+    try:
+        # 1. the other slot's version can no longer boot, then its slot is free
+        old = slot_version(other)
+        if old:
+            remove_entries(old)
+        set_label(disk, other, EMPTY_LABEL)
 
-    # 3. boot entry: from now on systemd-boot tries the new version first
-    write_uki(urllib.parse.urljoin(base, f"{IMAGE_ID}_{version}.efi"), files[f"{IMAGE_ID}_{version}.efi"], version)
+        # 2. root partition, labelled only once it is complete
+        write_root(urllib.parse.urljoin(base, f"{IMAGE_ID}_{version}.root.raw.gz"),
+                   files[f"{IMAGE_ID}_{version}.root.raw.gz"], other["path"], other["size"], fields)
+        set_label(disk, other, SLOT_PREFIX + version)
+        labelled = True
 
-    print(f"version {version} installed, active after a reboot (3 tries, then back to {current})")
+        # 3. boot entry: from now on systemd-boot tries the new version first
+        write_uki(urllib.parse.urljoin(base, f"{IMAGE_ID}_{version}.efi"), files[f"{IMAGE_ID}_{version}.efi"],
+                  version, fields)
+    except (Cancelled, UpdateError, OSError, urllib.error.URLError) as e:
+        # the slot without a boot entry: empty again, so nothing shows a version that cannot boot
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if labelled:
+            set_label(disk, other, EMPTY_LABEL)
+        remove_entries(version)
+        if isinstance(e, Cancelled):
+            report(**fields, state="cancelled")
+            raise
+        raise UpdateError(str(e)) from e
+
+    report(**fields, state="done", percent=100)
+    output({**fields, "state": "done"},
+           f"version {version} installed, active after a reboot (3 tries, then back to {current})")
     if reboot:
         subprocess.run(["systemctl", "reboot"], check=True)
 
 
+def versions_of(state):
+    return {k: v for k, v in state.items() if k in ("from", "version")}
+
+
+def option(args, name):
+    return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else None
+
+
 def main(args):
-    if os.geteuid() != 0:
-        fail("needs root")
+    global JSON
+    JSON = "--json" in args
+    args = [a for a in args if a != "--json"]
     command = args[0] if args else "status"
-    if command == "status":
-        status()
-    elif command == "check":
-        check()
-    elif command == "update":
-        version = args[args.index("--version") + 1] if "--version" in args else None
-        update(version, reboot="--reboot" in args)
+    try:
+        if os.geteuid() != 0:
+            fail("needs root (pkexec)")
+        if command == "status":
+            status()
+        elif command == "check":
+            check()
+        elif command == "update":
+            try:
+                update(option(args, "--version"), reboot="--reboot" in args)
+            except Cancelled:
+                report(**versions_of(read_state()), state="cancelled")
+                raise
+            except (UpdateError, OSError, urllib.error.URLError) as e:
+                message = f"update server: {e.reason}" if isinstance(e, urllib.error.URLError) else str(e)
+                report(**versions_of(read_state()), state="error", error=message)
+                raise UpdateError(message) from e
+        elif command == "start":
+            start(option(args, "--version"))
+        elif command == "cancel":
+            cancel()
+        else:
+            sys.exit(__doc__)
+    except urllib.error.URLError as e:
+        error(f"update server: {e.reason}")
+    except UpdateError as e:
+        error(str(e))
+    except Cancelled:
+        error("cancelled")
+
+
+def error(message):
+    if JSON:
+        print(json.dumps({"error": message}))
     else:
-        sys.exit(__doc__)
+        print(f"openhu-update: {message}", file=sys.stderr)
+    sys.exit(1)
 
 
 if __name__ == "__main__":
-    try:
-        main(sys.argv[1:])
-    except urllib.error.URLError as e:
-        fail(f"update server: {e}")
+    main(sys.argv[1:])

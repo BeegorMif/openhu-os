@@ -1,5 +1,5 @@
 // The openhu user controls NetworkManager (wireless Android Auto hotspot), may reboot/power off and run the
-// OpenHU OS helpers as root with pkexec (ssh switch and password).
+// OpenHU OS helpers as root with pkexec (ssh switch and password, system update).
 polkit.addRule(function(action, subject) {
     if (subject.user != "openhu")
         return polkit.Result.NOT_HANDLED;
@@ -10,7 +10,8 @@ polkit.addRule(function(action, subject) {
         || action.id == "org.freedesktop.login1.power-off-multiple-sessions")
         return polkit.Result.YES;
     if (action.id == "org.freedesktop.policykit.exec"
-        && action.lookup("program") == "/usr/libexec/openhu-os/openhu-ssh")
+        && (action.lookup("program") == "/usr/libexec/openhu-os/openhu-ssh"
+            || action.lookup("program") == "/usr/libexec/openhu-os/openhu-update"))
         return polkit.Result.YES;
     return polkit.Result.NOT_HANDLED;
 });

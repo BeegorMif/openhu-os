@@ -93,9 +93,10 @@ ssh_vm cat /run/openhu-os/boot-status.json | grep -q '"state": "updated"' || fai
 step "   runs, marked good, boot status updated, volume kept"
 
 step "3. power cut while writing the root partition"
-ssh_vm "OPENHU_UPDATE_URL=http://10.0.2.2:$HTTP/ nohup openhu-update update --version $V3 > /run/update.log 2>&1 &"
+# in the background like OpenHU does it (openhu-update.service), progress from /run/openhu-os/update.json
+update_vm start --version "$V3" >/dev/null
 start=$SECONDS
-until ssh_vm 'grep -q "root partition: 40" /run/update.log' 2>/dev/null; do
+until ssh_vm 'grep -Eq "\"phase\": \"root\", \"percent\": ([4-9][0-9])" /run/openhu-os/update.json' 2>/dev/null; do
   [ $((SECONDS - start)) -lt 60 ] || fail "update did not start"
   sleep 0.2
 done
