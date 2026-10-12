@@ -87,13 +87,17 @@ if [ "$PHONES" = 1 ]; then
   done
 fi
 
+# Sound through the host's PipeWire; without it (CI) the guest still has its sound card
+audio=none
+[ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pipewire-0" ] && audio=pipewire
+
 exec qemu-system-x86_64 -name openhu-os -nodefaults -machine q35,accel=kvm,vmport=off -cpu host -smp 4 -m 4096 -uuid "$VM_UUID" \
   -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
   -drive if=pflash,format=raw,unit=1,file="$VM/OVMF_VARS.fd" \
   -drive if=none,id=disk0,format=raw,file="$VM/disk.raw",cache=writeback,discard=unmap \
   -device virtio-blk-pci,drive=disk0,bootindex=1 \
   "${display[@]}" "${usb[@]}" \
-  -audiodev pipewire,id=snd0 -device intel-hda -device hda-duplex,audiodev=snd0 \
+  -audiodev "$audio,id=snd0" -device intel-hda -device hda-duplex,audiodev=snd0 \
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22 -device virtio-net-pci,netdev=net0 \
   -device virtio-rng-pci \
   -qmp unix:"$VM/qmp.sock",server=on,wait=off \
