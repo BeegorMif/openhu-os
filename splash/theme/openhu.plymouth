@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=OpenHU
+Description=OpenHU logo on the background of the shell until OpenHU shows its first frame
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/openhu
+ScriptFile=/usr/share/plymouth/themes/openhu/openhu.script

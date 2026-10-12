@@ -34,6 +34,27 @@ if [ "$(docker image inspect -f '{{index .Config.Labels "openhu-os.hash"}}' "$IM
   docker build --label openhu-os.hash="$hash" -t "$IMAGE" -f docker/builder.Dockerfile docker
 fi
 
+# Boot splash (Plymouth theme in splash/) as a package next to openhu and libaasdk: it is needed in the initrd too
+stage="$(mktemp -d)"
+splash_version="$(git log -1 --format=%cd --date=format:%Y.%m.%d.%H%M -- splash 2>/dev/null)"
+[ -n "$splash_version" ] || splash_version="$(date -u +%Y.%m.%d.%H%M)"
+install -Dm644 -t "$stage/usr/share/plymouth/themes/openhu" splash/theme/*
+install -Dm755 splash/postinst "$stage/DEBIAN/postinst"
+cat > "$stage/DEBIAN/control" <<CONTROL
+Package: openhu-os-splash
+Version: $splash_version
+Architecture: all
+Maintainer: OpenHU <https://github.com/average-web-dev/openhu-os>
+Depends: plymouth
+Section: misc
+Priority: optional
+Description: OpenHU boot splash
+ Plymouth theme: the OpenHU logo until OpenHU shows its first frame.
+CONTROL
+rm -f packages/openhu-os-splash_*.deb
+dpkg-deb --root-owner-group -Zxz -b "$stage" packages/ >/dev/null
+rm -rf "$stage"
+
 # ssh key of the dev VM (scripts/ssh.sh), generated once, only for root login in dev images
 [ -f local/id_ed25519 ] || ssh-keygen -q -t ed25519 -N "" -C "openhu-os dev VM" -f local/id_ed25519
 mkdir -p local/dev-extra/root/.ssh

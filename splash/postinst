@@ -1,0 +1,12 @@
+#!/bin/sh
+# OpenHU boot splash: plymouthd.conf belongs to the plymouth package, the theme is set here
+set -e
+if [ "$1" = configure ]; then
+    cat > /etc/plymouth/plymouthd.conf <<'CONF'
+# OpenHU boot splash (openhu-os-splash)
+[Daemon]
+Theme=openhu
+ShowDelay=0
+DeviceTimeout=8
+CONF
+fi

@@ -1,0 +1,43 @@
+// OpenHU boot splash: the logo on the shell's background (Theme.qml: #0f1317), three pulsing dots below.
+Window.SetBackgroundTopColor(0.059, 0.075, 0.090);
+Window.SetBackgroundBottomColor(0.059, 0.075, 0.090);
+
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+// Logo: 40 % of the screen width, at most its native size
+logo_image = Image("logo.png");
+logo_width = Math.Min(screen_width * 0.4, logo_image.GetWidth());
+logo_height = logo_image.GetHeight() * logo_width / logo_image.GetWidth();
+logo = Sprite(logo_image.Scale(logo_width, logo_height));
+logo.SetX(Window.GetX() + (screen_width - logo_width) / 2);
+logo.SetY(Window.GetY() + (screen_height - logo_height) / 2 - logo_height * 0.3);
+
+// Dots: one pulses after the other
+dot_size = Math.Max(8, logo_height * 0.12);
+dot_image = Image("dot.png").Scale(dot_size, dot_size);
+dot_gap = dot_size * 1.8;
+for (i = 0; i < 3; i++)
+{
+    dots[i] = Sprite(dot_image);
+    dots[i].SetX(Window.GetX() + screen_width / 2 + (i - 1) * dot_gap - dot_size / 2);
+    dots[i].SetY(logo.GetY() + logo_height + logo_height * 0.6);
+    dots[i].SetOpacity(0.25);
+}
+
+frame = 0;
+fun refresh_callback()
+{
+    frame++;
+    for (i = 0; i < 3; i++)
+    {
+        // 50 refreshes per second: a full cycle every 1.5 s
+        phase = (frame / 25 - i * 0.5) % 1.5;
+        if (phase < 0) phase = phase + 1.5;
+        if (phase < 0.5)
+            dots[i].SetOpacity(0.25 + 0.75 * Math.Sin(phase / 0.5 * 3.1416));
+        else
+            dots[i].SetOpacity(0.25);
+    }
+}
+Plymouth.SetRefreshFunction(refresh_callback);
