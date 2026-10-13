@@ -5,6 +5,10 @@ set -e
 systemd-sysusers
 systemd-tmpfiles --create --prefix=/var/lib/openhu
 systemctl mask openhu.service
+# OpenHU is not in PATH: only openhu-session starts it (openhu-cli start | stop | restart), "openhu" would be
+# mistaken for the command line openhu-cli. The package links /usr/bin/openhu (and the old /usr/bin/autoapp) to it.
+[ -x /usr/libexec/openhu/openhu ] || { echo "openhu package without /usr/libexec/openhu/openhu (older than openhu#20)" >&2; exit 1; }
+rm -f /usr/bin/openhu /usr/bin/autoapp
 systemctl set-default graphical.target
 # Writes a random seed to the ESP on every boot: not needed by a head unit, and a write on every boot
 systemctl mask systemd-boot-random-seed.service

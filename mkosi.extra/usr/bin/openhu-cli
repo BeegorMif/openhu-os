@@ -1,11 +1,13 @@
 #!/usr/bin/python3
-"""openhu – the command line of OpenHU OS: the system (update, ssh, time), the settings of OpenHU and commands to
-the running OpenHU through its API (ws://127.0.0.1:<api port>). "openhu help" lists the commands, "openhu help
-<command>" explains one. Every command takes --json (output for scripts); an error ends with exit code 1.
+"""openhu-cli – the command line of OpenHU OS: the system (update, ssh, time), the settings of OpenHU and commands
+to the running OpenHU through its API (ws://127.0.0.1:<api port>). "openhu-cli help" lists the commands,
+"openhu-cli help <command>" explains one. Every command takes --json (output for scripts); an error ends with exit
+code 1.
 
-The system commands (update, ssh, time, restart) run as root; as another user openhu runs itself through pkexec
-(polkit allows the openhu user exactly these, OpenHU's settings use them so). They call the helpers in
-/usr/libexec/openhu-os, which do the work.
+The system commands (update, ssh, time, start, stop, restart) run as root; as another user openhu-cli runs itself
+through pkexec (polkit allows the openhu user update, ssh, time and restart, OpenHU's settings use them so). They call
+the helpers in /usr/libexec/openhu-os, which do the work. OpenHU itself is not in PATH: openhu-session.service starts
+it (openhu-cli start/stop/restart).
 """
 import argparse
 import configparser
@@ -21,8 +23,9 @@ LIBEXEC = "/usr/libexec/openhu-os"
 RUN = "/run/openhu-os"
 INI = "/var/lib/openhu/openhu.ini"
 SESSION = "openhu-session.service"
-# commands that need root (pkexec for the openhu user, see the polkit rule)
-ROOT_COMMANDS = ("update", "ssh", "time", "restart")
+# commands that need root; the openhu user may run PKEXEC_COMMANDS through pkexec (the polkit rule)
+ROOT_COMMANDS = ("update", "ssh", "time", "start", "stop", "restart")
+PKEXEC_COMMANDS = ("update", "ssh", "time", "restart")
 PAGES = ["home", "aa", "settings", "store"] + ["settings/" + c for c in (
     "general", "aa", "audio", "wifi", "bluetooth", "network", "keys", "apps", "system", "info")]
 
@@ -48,11 +51,11 @@ def output(data, text):
 def ensure_root():
     if os.geteuid() == 0:
         return
-    if os.environ.get("OPENHU_NO_PKEXEC"):
-        fail("needs root")
     # pkexec keeps stdin (ssh password) and drops the environment; the command first (the polkit rule checks it)
     args = [a for a in sys.argv[1:] if a != "--json"] + (["--json"] if JSON else [])
-    os.execvp("pkexec", ["pkexec", "/usr/bin/openhu"] + args)
+    if os.environ.get("OPENHU_NO_PKEXEC") or not args or args[0] not in PKEXEC_COMMANDS:
+        fail("needs root")
+    os.execvp("pkexec", ["pkexec", "/usr/bin/openhu-cli"] + args)
 
 
 # --- helpers in /usr/libexec/openhu-os (root) ---
@@ -125,7 +128,8 @@ def connect():
             return ws
         except OSError:
             pass
-    fail(f"OpenHU is not running (no API on {' or '.join(urls)}) – see openhu status, openhu log, openhu restart")
+    fail(f"OpenHU is not running (no API on {' or '.join(urls)}) – see openhu-cli status, openhu-cli log, "
+         "openhu-cli start")
 
 
 def api(method, params=None):
@@ -188,7 +192,7 @@ def cmd_status(args):
     usb = read_json(f"{RUN}/usb-update.json")
     if usb.get("version"):
         data["usb"] = usb
-        lines.append(f"USB stick     OpenHU OS {usb['version']}" + (" – newer: openhu update install" if usb.get("newer") else ""))
+        lines.append(f"USB stick     OpenHU OS {usb['version']}" + (" – newer: openhu-cli update install" if usb.get("newer") else ""))
 
     try:
         api("system.ping")
@@ -241,7 +245,7 @@ def cmd_update(args):
         data = helper("openhu-update", ["check", "--json"])
         text = (f"Update available: {data['current']} → {data['newest']}"
                 + (" (on the USB stick)" if data.get("source") == "usb" else "")
-                + " – openhu update install" if data.get("available") else f"Up to date: {data['current']}")
+                + " – openhu-cli update install" if data.get("available") else f"Up to date: {data['current']}")
         if data.get("server_error"):
             text += f"\n({data['server_error']})"
         output(data, text)
@@ -253,7 +257,7 @@ def cmd_update(args):
     # install: always as openhu-update.service, so it survives a closed ssh connection
     data = helper("openhu-update", ["start", "--json"] + (["--version", args.version] if args.version else []))
     if args.no_wait:
-        output(data, f"Update started in the background: openhu update status")
+        output(data, f"Update started in the background: openhu-cli update status")
         return 0
     return follow_update(args.reboot)
 
@@ -278,7 +282,7 @@ def follow_update(reboot):
         if tty and shown:
             print()
     except KeyboardInterrupt:
-        output({"state": "running"}, "\nThe update goes on in the background: openhu update status, openhu update cancel")
+        output({"state": "running"}, "\nThe update goes on in the background: openhu-cli update status, openhu-cli update cancel")
         return 0
     if current == "done":
         output(state, f"OpenHU OS {state.get('version')} installed, active after a reboot"
@@ -303,7 +307,7 @@ def ssh_text(data):
     else:
         state = "on" + ("" if data.get("running") else " (starting)")
     login = [n for n, on in (("password", data.get("password")), ("key", data.get("keys"))) if on]
-    return f"ssh {state}, login as root with " + (" or ".join(login) if login else "nothing yet: openhu ssh password")
+    return f"ssh {state}, login as root with " + (" or ".join(login) if login else "nothing yet: openhu-cli ssh password")
 
 
 def cmd_ssh(args):
@@ -375,7 +379,7 @@ def cmd_time(args):
 # settings
 
 APPLIES = {"now": "", "reconnect": " – applies with the next Android Auto connection",
-           "restart": " – applies after a restart of OpenHU: openhu restart"}
+           "restart": " – applies after a restart of OpenHU: openhu-cli restart"}
 
 
 def key_help(key, schema):
@@ -469,7 +473,7 @@ def cmd_plugin(args):
         plugins = api("plugin.list") or []
         lines = [f"{p['id']}  {p.get('version', '')}  {'running' if p.get('running') else 'enabled' if p.get('enabled') else 'off'}"
                  f"  {p.get('name', '')}" for p in plugins]
-        output(plugins, lines or "No plugins installed (openhu store list).")
+        output(plugins, lines or "No plugins installed (openhu-cli store list).")
     else:
         data = api(f"plugin.{args.action}", {"id": args.id})
         output(data, f"{args.id}: {args.action}d" if args.action != "restart" else f"{args.id} restarted")
@@ -484,11 +488,11 @@ def cmd_store(args):
             state = ("update " + str(p.get("version")) if p.get("updateAvailable")
                      else "installed" if p.get("installed") else "")
             lines.append(f"{p['id']}  {p.get('version', '')}  {state}  {p.get('name', '')}")
-        output(packages, lines or "The store is empty: openhu store refresh")
+        output(packages, lines or "The store is empty: openhu-cli store refresh")
         return 0
     params = {"id": args.id} if args.id else {}
     if args.action in ("install", "remove") and not args.id:
-        fail(f"store {args.action}: which plugin? (openhu store list)")
+        fail(f"store {args.action}: which plugin? (openhu-cli store list)")
     # the store works in the background, store.state says when it is done
     state = api_and_wait(f"store.{args.action}", params, "store.state")
     if state.get("error"):
@@ -507,7 +511,7 @@ def cmd_bt(args):
         output(data, f"Searching for {args.seconds} s, the phone finds OpenHU now too.")
     else:
         if not args.address:
-            fail(f"bt {args.action}: which device? (openhu bt devices)")
+            fail(f"bt {args.action}: which device? (openhu-cli bt devices)")
         data = api(f"bluetooth.{args.action}", {"address": args.address})
         output(data, f"{args.address}: {args.action}")
     return 0
@@ -546,7 +550,7 @@ def cmd_wifi(args):
     networks = (api("wifi.state") or {}).get("networks", [])
     match = [n for n in networks if n["ssid"] == args.ssid or n.get("uuid") == args.ssid]
     if not match:
-        fail(f"no saved network \"{args.ssid}\" (openhu wifi list)")
+        fail(f"no saved network \"{args.ssid}\" (openhu-cli wifi list)")
     method = {"connect": "wifi.connect", "remove": "wifi.remove", "up": "wifi.moveUp"}[args.action]
     api(method, {"uuid": match[0]["uuid"]})
     output({"ssid": args.ssid}, None)
@@ -584,6 +588,21 @@ def cmd_watch(args):
             return 0
 
 
+# OpenHU itself is not in PATH: openhu-session (cage + /usr/libexec/openhu/openhu) runs it
+def cmd_start(args):
+    ensure_root()
+    subprocess.run(["systemctl", "start", SESSION], check=True)
+    output({"running": True}, "OpenHU started.")
+    return 0
+
+
+def cmd_stop(args):
+    ensure_root()
+    subprocess.run(["systemctl", "stop", SESSION], check=True)
+    output({"running": False}, "OpenHU stopped until openhu-cli start or the next boot.")
+    return 0
+
+
 def cmd_restart(args):
     ensure_root()
     subprocess.run(["systemctl", "restart", SESSION], check=True)
@@ -596,7 +615,7 @@ def cmd_log(args):
     return subprocess.run(command).returncode
 
 
-# --- completion ("openhu complete <words>", used by /usr/share/bash-completion/completions/openhu) ---
+# --- completion ("openhu-cli complete <words>", used by /usr/share/bash-completion/completions/openhu-cli) ---
 
 def cmd_complete(args, parser):
     words = args.words
@@ -674,8 +693,8 @@ def subparsers_of(parser):
 # --- arguments ---
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="openhu", description="The command line of OpenHU OS.",
-                                     epilog="openhu help <command> explains a command; --json: output for scripts.")
+    parser = argparse.ArgumentParser(prog="openhu-cli", description="The command line of OpenHU OS.",
+                                     epilog="openhu-cli help <command> explains a command; --json: output for scripts.")
     commands = parser.add_subparsers(dest="command", metavar="<command>")
 
     def command(name, help, func, **kwargs):
@@ -741,13 +760,15 @@ def build_parser():
     sub.add_argument("--password", help="add: else asked (empty for an open network)")
     sub.add_argument("--hidden", action="store_true", help="add: the network does not show its name")
 
-    sub = command("api", "call an API method: openhu api volume.set '{\"value\": 40}'; openhu api methods", cmd_api)
+    sub = command("api", "call an API method: openhu-cli api volume.set '{\"value\": 40}'; openhu-cli api methods", cmd_api)
     sub.add_argument("method")
     sub.add_argument("params", nargs="?", help="JSON object")
 
     sub = command("watch", "print events live (topics like nav.* media.metadata, default all)", cmd_watch)
     sub.add_argument("topics", nargs="*")
 
+    command("start", "start OpenHU", cmd_start)
+    command("stop", "stop OpenHU (until start or the next boot)", cmd_stop)
     command("restart", "restart OpenHU", cmd_restart)
 
     sub = command("log", "OpenHU's log (follows it, Ctrl+C ends)", cmd_log)
@@ -785,7 +806,7 @@ def main(argv):
         if JSON:
             print(json.dumps({"error": str(e)}, ensure_ascii=False))
         else:
-            print(f"openhu: {e}", file=sys.stderr)
+            print(f"openhu-cli: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         return 130

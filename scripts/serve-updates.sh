@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Serves the update directory (scripts/add-update.sh) on 127.0.0.1:8070, the update server of the dev image
-# (http://10.0.2.2:8070/ from inside the VM). In the VM: openhu update check / openhu update install --reboot
+# (http://10.0.2.2:8070/ from inside the VM). In the VM: openhu-cli update check / openhu-cli update install --reboot
 #
 #   scripts/serve-updates.sh [DIR]
 set -euo pipefail
