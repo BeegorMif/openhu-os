@@ -1,6 +1,6 @@
 # Builds the OpenHU OS images with the newest OpenHU from its CI, tests the dev image in a VM (KVM, power cuts) and
 # builds the release image. A tag v<version> (digits and dots, e.g. v2026.10.13) publishes it as a GitHub release:
-# the disk image to flash and the update that "openhu update" installs (releases/latest/download/).
+# the disk image to flash and the update that "openhu-cli update" installs (releases/latest/download/).
 name: Image
 
 on:

@@ -44,32 +44,38 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): signed checksums
 ([#21](https://github.com/average-web-dev/openhu-os/issues/21)), Raspberry Pi 4/5.
 
-## The openhu command
+## The openhu-cli command
 
 One command for the system, the settings of OpenHU and the running OpenHU (through its API on
 `ws://127.0.0.1:<api port>`); Tab completes commands and, live from OpenHU, setting keys, pages, actions and plugins:
 
 ```bash
-openhu help                         # all commands; openhu help <command> explains one
-openhu status                       # OS version and update slots, OpenHU, Android Auto, WiFi, volume
-openhu update check | install [--reboot] | status | cancel
-openhu ssh status | on | off | password [--clear]
-openhu time status | zone Europe/Berlin | zones | ntp on|off | set "2026-10-13 14:30"
-openhu config list [prefix] | keys | get aa.fps | set aa.fps 60     # says when a reconnect or restart is needed
-openhu page settings/system         # like tapping the dock: home, aa, settings[/<category>], store, plugin:<id>
-openhu action media.next            # like a steering wheel button; openhu action --list
-openhu volume 40 | +5 | -5 | mute   # openhu toast "Hello", openhu daynight auto|day|night
-openhu plugin list | restart <id>   # openhu store list | install <id>, openhu bt devices, openhu wifi list | scan
-openhu api volume.set '{"value": 40}'   # any API method; openhu api methods
-openhu watch nav.* media.metadata   # events live
-openhu log | restart                # OpenHU's log (journal of openhu-session), restart it
+openhu-cli help                         # all commands; openhu-cli help <command> explains one
+openhu-cli status                       # OS version and update slots, OpenHU, Android Auto, WiFi, volume
+openhu-cli update check | install [--reboot] | status | cancel
+openhu-cli ssh status | on | off | password [--clear]
+openhu-cli time status | zone Europe/Berlin | zones | ntp on|off | set "2026-10-13 14:30"
+openhu-cli config list [prefix] | keys | get aa.fps | set aa.fps 60     # says when a reconnect or restart is needed
+openhu-cli page settings/system         # like tapping the dock: home, aa, settings[/<category>], store, plugin:<id>
+openhu-cli action media.next            # like a steering wheel button; openhu-cli action --list
+openhu-cli volume 40 | +5 | -5 | mute   # openhu-cli toast "Hello", openhu-cli daynight auto|day|night
+openhu-cli plugin list | restart <id>   # openhu-cli store list | install <id>, openhu-cli bt devices, openhu-cli wifi list | scan
+openhu-cli api volume.set '{"value": 40}'   # any API method; openhu-cli api methods
+openhu-cli watch nav.* media.metadata   # events live
+openhu-cli log | start | stop | restart # OpenHU's log (journal of openhu-session), start/stop/restart it
 ```
 
 `--json` gives every command's result as JSON for scripts; errors end with exit code 1 (`{"error": ...}`). Without
 a running OpenHU the system commands still work, the others say so. The system commands (`update`, `ssh`, `time`,
-`restart`) need root: the `openhu` user runs them through `pkexec` (the polkit rule allows exactly these, OpenHU's
-settings use them so), `openhu` does that by itself. The work is done by helpers in `/usr/libexec/openhu-os`
-(`openhu-update`, `openhu-ssh`, `openhu-time`), which are not meant to be called directly.
+`start`, `stop`, `restart`) need root: the `openhu` user runs `update`, `ssh`, `time` and `restart` through `pkexec`
+(the polkit rule allows exactly these, OpenHU's settings use them so), `openhu-cli` does that by itself. The work is
+done by helpers in `/usr/libexec/openhu-os` (`openhu-update`, `openhu-ssh`, `openhu-time`), which are not meant to be
+called directly.
+
+OpenHU itself (`/usr/libexec/openhu/openhu`) is not in PATH: `openhu-session.service` runs it in cage, `openhu-cli
+start | stop | restart` controls it. A second OpenHU started by hand ends right away ("already running", lock
+`/run/lock/openhu.lock`). Older images (before
+[openhu#20](https://github.com/average-web-dev/openhu/issues/20)) call the command line `openhu`.
 
 ## ssh
 
@@ -77,9 +83,9 @@ Off in the release image. OpenHU switches it on and sets root's password
 ([openhu#29](https://github.com/average-web-dev/openhu/issues/29)) with `openhu ssh`:
 
 ```bash
-openhu ssh status --json                   # {"enabled", "running", "password", "keys"}
-echo 'secret-password' | openhu ssh password   # at least 8 characters (asked twice on a terminal)
-openhu ssh on                              # now and at every boot; off switches it off
+openhu-cli ssh status --json                   # {"enabled", "running", "password", "keys"}
+echo 'secret-password' | openhu-cli ssh password   # at least 8 characters (asked twice on a terminal)
+openhu-cli ssh on                              # now and at every boot; off switches it off
 ```
 
 Everything is on the data partition (`/etc` is read-only): the switch `/var/lib/openhu-os/ssh/enabled`, the
@@ -94,10 +100,10 @@ Set in OpenHU (Settings → System, [openhu#36](https://github.com/average-web-d
 `openhu time`:
 
 ```bash
-openhu time status --json            # {"zone", "ntp", "synchronized", "time"}
-openhu time zone Europe/Berlin       # applies at once, also to running programs
-openhu time ntp off                  # time from the internet (systemd-timesyncd) off
-openhu time set "2026-10-13 14:30"   # local time (or seconds since 1970), only with ntp off
+openhu-cli time status --json            # {"zone", "ntp", "synchronized", "time"}
+openhu-cli time zone Europe/Berlin       # applies at once, also to running programs
+openhu-cli time ntp off                  # time from the internet (systemd-timesyncd) off
+openhu-cli time set "2026-10-13 14:30"   # local time (or seconds since 1970), only with ntp off
 ```
 
 `/etc/localtime` links to `/var/lib/openhu-os/time/localtime`, which links to the zone (UTC until one is
@@ -152,14 +158,14 @@ Profiles:
 |---|---|---|
 | ssh | always on: root with the key in `local/id_ed25519` (`scripts/ssh.sh`), password `openhu` | off until switched on in OpenHU (below) |
 | Console | serial (`ttyS0`), Ctrl+Alt+F2 switches away from cage | none |
-| Tools | `grim` (screenshots), strace, libinput-tools, … | none (`openhu` in both) |
+| Tools | `grim` (screenshots), strace, libinput-tools, … | none (`openhu-cli` in both) |
 
 ## Run in a VM
 
 ```bash
 scripts/run-vm.sh --fresh       # new VM disk from the newest image, window with 3D
 scripts/ssh.sh                  # root shell in the VM
-scripts/ssh.sh openhu status
+scripts/ssh.sh openhu-cli status
 scripts/screenshot.sh           # vm/screen.png (grim in the guest)
 ```
 
@@ -179,9 +185,9 @@ The VM disk (`vm/disk.raw`, 16 GB sparse) keeps its data until `--fresh`.
 scripts/build.sh --version 2026.10.13.1        # a newer version
 scripts/add-update.sh                          # newest build into mkosi.output/updates (root partition, UKI, SHA256SUMS)
 scripts/serve-updates.sh                       # http://127.0.0.1:8070, the dev image's update server
-scripts/ssh.sh openhu update check
-scripts/ssh.sh openhu update install --reboot
-scripts/ssh.sh openhu update status            # slots and boot entries: good, n tries left, failed
+scripts/ssh.sh openhu-cli update check
+scripts/ssh.sh openhu-cli update install --reboot
+scripts/ssh.sh openhu-cli update status            # slots and boot entries: good, n tries left, failed
 ```
 
 A USB stick for the running VM (`--instance NAME` for a second VM):
@@ -213,10 +219,10 @@ removed", the slot is empty again.
 **For OpenHU** (the update button, [openhu#28](https://github.com/average-web-dev/openhu/issues/28)), in JSON:
 
 ```bash
-openhu update status --json                    # running, other, entries (good/trying/failed), update, active, usb
-openhu update check --json                     # {"current", "newest", "available", "source": "usb" | "online"}
-openhu update install --no-wait --json         # starts openhu-update.service and returns ({"started": true})
-openhu update cancel --json                    # the slot is empty again, the running version stays
+openhu-cli update status --json                    # running, other, entries (good/trying/failed), update, active, usb
+openhu-cli update check --json                     # {"current", "newest", "available", "source": "usb" | "online"}
+openhu-cli update install --no-wait --json         # starts openhu-update.service and returns ({"started": true})
+openhu-cli update cancel --json                    # the slot is empty again, the running version stays
 cat /run/openhu-os/update.json                 # progress, no root needed
 cat /run/openhu-os/usb-update.json             # newest version on the sticks: {"current", "version", "newer", "path"}
 ```

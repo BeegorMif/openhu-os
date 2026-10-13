@@ -134,8 +134,9 @@ AASDK_OLD=""
   echo "**New installation:** \`xz -d openhu-os_$VERSION.raw.xz\`, write it to the disk or SD card"
   echo "(\`dd\`, balenaEtcher). It grows to the whole disk on the first boot."
   echo
-  echo "**Update** of a running OpenHU OS: \`openhu update install --reboot\` (root partition and kernel"
-  echo "image of this release, back to the version before if OpenHU does not come up)."
+  echo "**Update** of a running OpenHU OS: Settings → System, or \`openhu-cli update install --reboot\` (root"
+  echo "partition and kernel image of this release, back to the version before if OpenHU does not come up; images"
+  echo "from before openhu-cli: \`openhu update install --reboot\`)."
   echo
   echo "**Without internet:** copy \`SHA256SUMS\`, \`openhu-os_$VERSION.root.raw.gz\` and"
   echo "\`openhu-os_$VERSION.efi\` to a USB stick (FAT32, exFAT, NTFS or ext4) and plug it in: OpenHU offers the"

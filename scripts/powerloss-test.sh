@@ -46,7 +46,7 @@ trap 'cut_power' EXIT
 # Seconds until the API answers, fails after 90 s
 wait_api() {
   local start=$SECONDS
-  until ssh_vm openhu api system.ping >/dev/null 2>&1; do
+  until ssh_vm openhu-cli api system.ping >/dev/null 2>&1; do
     if [ $((SECONDS - start)) -ge 90 ] || ! kill -0 "$QEMU" 2>/dev/null; then
       echo "FAIL: OpenHU did not come up, serial console in $LOG" >&2
       exit 1
@@ -67,13 +67,13 @@ failed="$(systemctl --failed --no-legend --plain | awk '{print $1}' | xargs)"
 findmnt -n -o OPTIONS / | grep -q '^ro' || fail "/ is not read-only"
 [ "$(lsblk -n -o PARTLABEL "$(findmnt -n -o SOURCE /var)")" = openhu-data ] || fail "/var is not the data partition"
 findmnt -n -o OPTIONS /var | grep -q '^rw' || fail "/var is not read-write"
-status="$(openhu status --json)" || fail "openhu status: $status"
-echo "$status" | grep -q '"running": true' || fail "openhu status: OpenHU not running: $status"
-openhu help >/dev/null || fail "openhu help"
-sources="$(openhu api store.sources.list)" || fail "store.sources.list: $sources"
+status="$(openhu-cli status --json)" || fail "openhu-cli status: $status"
+echo "$status" | grep -q '"running": true' || fail "openhu-cli status: OpenHU not running: $status"
+openhu-cli help >/dev/null || fail "openhu-cli help"
+sources="$(openhu-cli api store.sources.list)" || fail "store.sources.list: $sources"
 echo "$sources" | grep -q '"official": true' || fail "official plugin source lost: $(od -c /var/lib/openhu/.openhu/sources.list | head -3)"
 [ -z "$MARKER" ] || echo "$sources" | grep -q "$MARKER" || fail "saved source $MARKER lost: $sources"
-volume="$(openhu api volume.get | grep -o '"volume": [0-9]*' | cut -d' ' -f2)"
+volume="$(openhu-cli api volume.get | grep -o '"volume": [0-9]*' | cut -d' ' -f2)"
 [ -z "$VOLUME" ] || [ "$volume" = "$VOLUME" ] || fail "saved volume $VOLUME lost, volume is $volume"
 lsblk -n -o PARTLABEL /dev/vda | grep -qx _empty || fail "root slot B missing"
 fsck="$(journalctl -b -o cat -u 'systemd-fsck@*' | grep 'openhu-data:' | head -1)"
@@ -85,9 +85,9 @@ EOF
 # written. The writer adds and removes the source behind it (index 2).
 save_settings() {
   ssh_vm sh -s <<EOF >/dev/null
-while openhu api store.sources.remove '{"index": 1}'; do :; done
-openhu api store.sources.add '{"type": "url", "location": "$1"}'
-openhu api volume.set '{"value": $2}'
+while openhu-cli api store.sources.remove '{"index": 1}'; do :; done
+openhu-cli api store.sources.add '{"type": "url", "location": "$1"}'
+openhu-cli api volume.set '{"value": $2}'
 sleep 3
 EOF
 }
@@ -98,8 +98,8 @@ start_writer() {
 i=0
 while :; do
   i=$((i + 1))
-  openhu api store.sources.add "{\"type\": \"url\", \"location\": \"https://example.invalid/write-$i/\"}" >/dev/null
-  openhu api store.sources.remove '{"index": 2}' >/dev/null
+  openhu-cli api store.sources.add "{\"type\": \"url\", \"location\": \"https://example.invalid/write-$i/\"}" >/dev/null
+  openhu-cli api store.sources.remove '{"index": 2}' >/dev/null
   dd if=/dev/urandom of=/var/tmp/powerloss.$((i % 4)) bs=64k count=16 conv=fsync status=none
   echo $i > /run/powerloss-cycles
 done
