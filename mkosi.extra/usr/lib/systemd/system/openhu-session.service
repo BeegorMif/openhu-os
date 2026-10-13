@@ -31,9 +31,13 @@ EnvironmentFile=-/var/lib/openhu/session.env
 ExecStartPre=+-/usr/bin/plymouth quit --retain-splash
 # "iw reg set" for the hotspot country runs in a child process of autoapp
 AmbientCapabilities=CAP_NET_ADMIN
-ExecStart=/usr/bin/cage -d -- /usr/bin/autoapp
+# session-client: cage alone misses OpenHU's end while OpenHU's children run (see there)
+ExecStart=/usr/bin/cage -d -- /usr/libexec/openhu-os/session-client /usr/bin/autoapp
 Restart=always
 RestartSec=2
+# A stop right after a start can find OpenHU only just started by cage, past systemd's SIGTERM: cage then waits for
+# it forever. OpenHU does not catch SIGTERM, so nothing needs longer than a moment.
+TimeoutStopSec=5s
 
 [Install]
 WantedBy=graphical.target

@@ -1,0 +1,19 @@
+#!/bin/bash
+# cage's client in openhu-session.service: runs OpenHU (the arguments) and ends when it ends.
+# cage 0.2 does not wait for its client process: it ends when a pipe whose write end the client inherits (without
+# FD_CLOEXEC) is closed. OpenHU's long-running children (pactl subscribe, nmcli monitor, plugins) inherited that end
+# too, so a crashed OpenHU stayed a zombie under a running cage and systemd never restarted the session. This shell
+# keeps the pipe and starts OpenHU with every inherited descriptor above stderr closed.
+(
+  for fd in /proc/self/fd/*; do
+    fd=${fd##*/}
+    if [ "$fd" -gt 2 ]; then exec {fd}>&-; fi
+  done
+  exec "$@"
+) <&0 &
+# (bash reports a killed job with the whole subshell: our own line instead; "<&0" keeps the tty as stdin)
+wait $! 2>/dev/null
+status=$?
+# (OpenHU itself exits with 255 when cage closes its Wayland connection)
+if [ $status -gt 128 ] && signal=$(kill -l $status 2>/dev/null); then echo "$1 ended by signal $signal" >&2; fi
+exit $status
