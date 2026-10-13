@@ -35,6 +35,12 @@ AmbientCapabilities=CAP_NET_ADMIN
 ExecStart=/usr/bin/cage -d -- /usr/libexec/openhu/openhu
 Restart=always
 RestartSec=2
+# A crashed OpenHU ends cage and so the session (OpenHU keeps cage's pipe from its children, openhu#68), and
+# Restart= brings it back.
+# A stop right after a start can find OpenHU only just started by cage, past systemd's single SIGTERM: cage then
+# waits for it forever, until this timeout. Not shorter: on SIGTERM OpenHU stops CarAudio, the hotspot and its
+# plugins (3 s for all, then SIGKILL and 1 s) and saves its settings, usually within 150 ms.
+TimeoutStopSec=15s
 
 [Install]
 WantedBy=graphical.target
