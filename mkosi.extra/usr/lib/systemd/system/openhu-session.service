@@ -1,6 +1,7 @@
 # OpenHU in the cage kiosk compositor on tty1. Replaces openhu.service of the openhu package (masked in the image).
+# The only way OpenHU starts here (it is not in PATH): openhu-cli start | stop | restart.
 [Unit]
-Description=OpenHU kiosk session (cage + autoapp)
+Description=OpenHU kiosk session (cage + OpenHU)
 Wants=dbus.socket systemd-logind.service
 After=dbus.socket systemd-logind.service systemd-user-sessions.service getty@tty1.service
 After=NetworkManager.service bluetooth.service
@@ -29,9 +30,9 @@ Environment=XKB_DEFAULT_LAYOUT=de
 EnvironmentFile=-/var/lib/openhu/session.env
 # The boot splash keeps its last frame until cage shows OpenHU ("+": as root, "-": no splash is fine)
 ExecStartPre=+-/usr/bin/plymouth quit --retain-splash
-# "iw reg set" for the hotspot country runs in a child process of autoapp
+# "iw reg set" for the hotspot country runs in a child process of OpenHU
 AmbientCapabilities=CAP_NET_ADMIN
-ExecStart=/usr/bin/cage -d -- /usr/bin/autoapp
+ExecStart=/usr/bin/cage -d -- /usr/libexec/openhu/openhu
 Restart=always
 RestartSec=2
 

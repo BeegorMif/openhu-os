@@ -32,9 +32,9 @@ else
 fi
 
 ssh_vm() { OPENHU_VM_SSH_PORT=$PORT "$REPO/scripts/ssh.sh" -o ConnectTimeout=2 "$@"; }
-update_vm() { ssh_vm "OPENHU_UPDATE_URL=http://10.0.2.2:$HTTP/ openhu update $*"; }
+update_vm() { ssh_vm "OPENHU_UPDATE_URL=http://10.0.2.2:$HTTP/ openhu-cli update $*"; }
 step() { echo "$(date +%T) $*"; }
-fail() { echo "FAIL: $*" >&2; ssh_vm openhu update status >&2 || true; exit 1; }
+fail() { echo "FAIL: $*" >&2; ssh_vm openhu-cli update status >&2 || true; exit 1; }
 
 start_vm() {
   "$REPO/scripts/run-vm.sh" --instance "$NAME" --ssh-port "$PORT" --headless --no-phone ${OPENHU_VM_OPTS:-} "$@" </dev/null >>"$LOG" 2>&1 &
@@ -57,7 +57,7 @@ trap cleanup EXIT
 wait_version() {
   local start=$SECONDS
   until [ "$(ssh_vm 'grep IMAGE_VERSION= /usr/lib/os-release' 2>/dev/null)" = "IMAGE_VERSION=\"$1\"" ] &&
-        { [ "${2:-}" = any ] || ssh_vm openhu api system.ping >/dev/null 2>&1; }; do
+        { [ "${2:-}" = any ] || ssh_vm openhu-cli api system.ping >/dev/null 2>&1; }; do
     [ $((SECONDS - start)) -lt "${3:-90}" ] || fail "version $1 did not come up"
     sleep 2
   done
@@ -65,7 +65,7 @@ wait_version() {
 
 wait_good() {
   local start=$SECONDS
-  until ssh_vm openhu update status 2>/dev/null | grep -q "openhu-os_$1.efi: good"; do
+  until ssh_vm openhu-cli update status 2>/dev/null | grep -q "openhu-os_$1.efi: good"; do
     [ $((SECONDS - start)) -lt 60 ] || fail "version $1 was not marked good"
     sleep 2
   done
@@ -81,14 +81,14 @@ SERVER=$!
 step "1. version $V1"
 start_vm --fresh --image "$REPO/mkosi.output/openhu-os_$V1.raw"
 wait_version "$V1"
-ssh_vm 'openhu volume 33' >/dev/null
+ssh_vm 'openhu-cli volume 33' >/dev/null
 sleep 3   # WirePlumber writes its state about a second later
 
 step "2. update to $V2"
 update_vm install --version "$V2" --reboot >/dev/null || true   # the ssh connection ends with the reboot
 wait_version "$V2"
 wait_good "$V2"
-ssh_vm openhu volume | grep -q '^33 %' || fail "volume lost in the update"
+ssh_vm openhu-cli volume | grep -q '^33 %' || fail "volume lost in the update"
 ssh_vm cat /run/openhu-os/boot-status.json | grep -q '"state": "updated"' || fail "boot status not updated"
 step "   runs, marked good, boot status updated, volume kept"
 
@@ -103,7 +103,7 @@ done
 cut_power
 start_vm
 wait_version "$V2"
-ssh_vm openhu update status | grep -q "other slot: empty" || fail "half written slot not empty"
+ssh_vm openhu-cli update status | grep -q "other slot: empty" || fail "half written slot not empty"
 step "   $V2 boots, the other slot is empty"
 
 step "4. update to the broken $V3"
@@ -111,7 +111,7 @@ update_vm install --version "$V3" --reboot >/dev/null || true
 wait_version "$V3" any
 step "   $V3 boots (try 1), waiting for three failed tries"
 wait_version "$V2" "" 600
-ssh_vm openhu update status | grep -q "openhu-os_$V3+0-3.efi: failed" || fail "$V3 not marked failed"
+ssh_vm openhu-cli update status | grep -q "openhu-os_$V3+0-3.efi: failed" || fail "$V3 not marked failed"
 step "   back on $V2, $V3 failed"
 
 echo "OK: update, power cut during an update and rollback"

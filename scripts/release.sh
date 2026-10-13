@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Release files of a build in mkosi.output (scripts/build.sh --profile release): the disk image to flash, the update
-# for "openhu update" (root partition, unified kernel image), the package manifest and SHA256SUMS over all of them.
+# for "openhu-cli update" (root partition, unified kernel image), the package manifest and SHA256SUMS over all of them.
 #
 #   scripts/release.sh VERSION [DIR]      default dist/
 set -euo pipefail

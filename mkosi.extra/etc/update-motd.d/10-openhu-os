@@ -20,10 +20,10 @@ cat <<'TEXT'
   /      read-only (erofs), only updated as a whole
   /var   data: OpenHU in /var/lib/openhu, the journal only in RAM
 
-  openhu help                     all commands (Tab completes)
-  openhu status                   versions, OpenHU, Android Auto, WiFi
-  openhu update check | install   system update
-  openhu config list | set        settings of OpenHU
-  openhu log | restart            log of OpenHU, restart it
+  openhu-cli help                     all commands (Tab completes)
+  openhu-cli status                   versions, OpenHU, Android Auto, WiFi
+  openhu-cli update check | install   system update
+  openhu-cli config list | set        settings of OpenHU
+  openhu-cli log | restart            log of OpenHU, restart it (start, stop)
 
 TEXT
