@@ -3,6 +3,7 @@
 /mkosi.tools/
 /.mkosi-private/
 /packages/
+/packages.source
 /local/
 /vm/
 /dist/

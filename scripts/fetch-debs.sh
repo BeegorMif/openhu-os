@@ -30,8 +30,12 @@ if [ "$SOURCE" = ci ]; then
   fi
   echo "openhu CI run $RUN_ID, artifact openhu-$ARCH"
   gh run download "$RUN_ID" -R average-web-dev/openhu -n "openhu-$ARCH" -D "$tmp"
+  # which OpenHU commit the packages come from, for the release notes (scripts/release-notes.sh)
+  gh run view "$RUN_ID" -R average-web-dev/openhu --json headSha,databaseId \
+      -q '"OPENHU_COMMIT=\(.headSha)\nOPENHU_CI_RUN=\(.databaseId)"' > "$tmp/source"
 else
   cp -v "$DIR"/*.deb "$tmp"/
+  echo "OPENHU_COMMIT=" > "$tmp/source"
 fi
 
 # exactly one version of each package: the local repository (reprepro) rejects duplicates
@@ -42,3 +46,4 @@ for name in openhu libaasdk; do
   [ -n "$deb" ] || { echo "no ${name}_*_$ARCH.deb found" >&2; exit 1; }
   cp -v "$deb" "$REPO/packages/"
 done
+cp "$tmp/source" "$REPO/packages.source"

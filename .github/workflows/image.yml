@@ -83,19 +83,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          {
-            echo "Debian 13 \"trixie\" with OpenHU in the cage kiosk, x86_64 (UEFI). Packages:"
-            echo
-            ls packages | sed 's/^/- /'
-            echo
-            echo "**New installation:** \`xz -d openhu-os_$VERSION.raw.xz\`, write it to the disk or SD card"
-            echo "(\`dd\`, balenaEtcher). It grows to the whole disk on the first boot."
-            echo
-            echo "**Update** of a running OpenHU OS: \`openhu update install --reboot\` (root partition and kernel"
-            echo "image of this release, back to the version before if OpenHU does not come up)."
-            echo
-            echo "**Without internet:** copy \`SHA256SUMS\`, \`openhu-os_$VERSION.root.raw.gz\` and"
-            echo "\`openhu-os_$VERSION.efi\` to a USB stick (FAT32, exFAT, NTFS or ext4) and plug it in: OpenHU offers the"
-            echo "update (Settings → System)."
-          } > notes.md
+          # what changed since the previous release: OpenHU, libaasdk, pull requests, Debian packages
+          scripts/release-notes.sh "$VERSION" > notes.md
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"
           gh release create "$GITHUB_REF_NAME" dist/* --title "OpenHU OS $VERSION" --notes-file notes.md
