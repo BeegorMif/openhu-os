@@ -191,18 +191,25 @@ def cmd_status(args):
         lines.append(f"USB stick     OpenHU OS {usb['version']}" + (" – newer: openhu update install" if usb.get("newer") else ""))
 
     try:
-        info = api("system.os")
-        projection = api("bus.get", {"topic": "projection.state"}) or {}
-        transport = (api("bus.get", {"topic": "projection.transport"}) or {}).get("transport")
-        wifi = api("wifi.state") or {}
-        wireless = api("wireless.state") or {}
-        volume = api("volume.get") or {}
-        pending = (api("settings.list") or {}).get("pending", [])
+        api("system.ping")
     except Failure as e:
         data["openhu"] = {"running": False, "error": str(e)}
         lines.append(f"OpenHU        not running ({e})")
         output(data, lines)
         return 1
+
+    def optional(method, params=None):
+        """a method an older OpenHU does not have yet: left out"""
+        try:
+            return api(method, params) or {}
+        except Failure:
+            return {}
+    projection = optional("bus.get", {"topic": "projection.state"})
+    transport = optional("bus.get", {"topic": "projection.transport"}).get("transport")
+    wifi = optional("wifi.state")
+    wireless = optional("wireless.state")
+    volume = optional("volume.get")
+    pending = optional("settings.list").get("pending", [])
     data["openhu"] = {"running": True, "api": api_url(), "pending": pending}
     data["androidAuto"] = {"connected": bool(projection.get("connected")), "transport": transport}
     data["wifi"] = wifi
