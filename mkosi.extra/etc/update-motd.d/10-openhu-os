@@ -20,9 +20,10 @@ cat <<'TEXT'
   /      read-only (erofs), only updated as a whole
   /var   data: OpenHU in /var/lib/openhu, the journal only in RAM
 
-  openhu-update status | check | update     system update
-  journalctl -u openhu-session -f           log of OpenHU
-  systemctl restart openhu-session          restart OpenHU
-  openhu-api system.methods                 WebSocket API
+  openhu help                     all commands (Tab completes)
+  openhu status                   versions, OpenHU, Android Auto, WiFi
+  openhu update check | install   system update
+  openhu config list | set        settings of OpenHU
+  openhu log | restart            log of OpenHU, restart it
 
 TEXT

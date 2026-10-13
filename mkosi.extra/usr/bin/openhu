@@ -1,0 +1,795 @@
+#!/usr/bin/python3
+"""openhu – the command line of OpenHU OS: the system (update, ssh, time), the settings of OpenHU and commands to
+the running OpenHU through its API (ws://127.0.0.1:<api port>). "openhu help" lists the commands, "openhu help
+<command>" explains one. Every command takes --json (output for scripts); an error ends with exit code 1.
+
+The system commands (update, ssh, time, restart) run as root; as another user openhu runs itself through pkexec
+(polkit allows the openhu user exactly these, OpenHU's settings use them so). They call the helpers in
+/usr/libexec/openhu-os, which do the work.
+"""
+import argparse
+import configparser
+import datetime
+import getpass
+import json
+import os
+import subprocess
+import sys
+import time
+
+LIBEXEC = "/usr/libexec/openhu-os"
+RUN = "/run/openhu-os"
+INI = "/var/lib/openhu/openhu.ini"
+SESSION = "openhu-session.service"
+# commands that need root (pkexec for the openhu user, see the polkit rule)
+ROOT_COMMANDS = ("update", "ssh", "time", "restart")
+PAGES = ["home", "aa", "settings", "store"] + ["settings/" + c for c in (
+    "general", "aa", "audio", "wifi", "bluetooth", "network", "keys", "apps", "system", "info")]
+
+JSON = False
+
+
+class Failure(Exception):
+    pass
+
+
+def fail(message):
+    raise Failure(message)
+
+
+def output(data, text):
+    """JSON for scripts, otherwise the text (a string or lines)"""
+    if JSON:
+        print(json.dumps(data, ensure_ascii=False))
+    elif text:
+        print(text if isinstance(text, str) else "\n".join(text))
+
+
+def ensure_root():
+    if os.geteuid() == 0:
+        return
+    if os.environ.get("OPENHU_NO_PKEXEC"):
+        fail("needs root")
+    # pkexec keeps stdin (ssh password) and drops the environment; the command first (the polkit rule checks it)
+    args = [a for a in sys.argv[1:] if a != "--json"] + (["--json"] if JSON else [])
+    os.execvp("pkexec", ["pkexec", "/usr/bin/openhu"] + args)
+
+
+# --- helpers in /usr/libexec/openhu-os (root) ---
+
+def helper(name, args, stdin=None):
+    """Runs a helper that answers in JSON (the last line); its error becomes a Failure"""
+    result = subprocess.run([os.path.join(LIBEXEC, name), *args], input=stdin, capture_output=True, text=True)
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    try:
+        data = json.loads(lines[-1]) if lines else {}
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {"result": data}
+    if "error" in data or result.returncode != 0:
+        fail(data.get("error") or result.stderr.strip() or f"{name} ended with code {result.returncode}")
+    return data
+
+
+def read_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (FileNotFoundError, ValueError, PermissionError):
+        return {}
+
+
+def os_version():
+    try:
+        with open("/usr/lib/os-release") as f:
+            for line in f:
+                if line.startswith("IMAGE_VERSION="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except FileNotFoundError:
+        pass
+    return None
+
+
+# --- OpenHU API ---
+
+API_URL = None  # the one that answered
+
+
+def api_urls():
+    """The port in openhu.ini, then the default one: a changed port only applies after a restart of OpenHU"""
+    if os.environ.get("OPENHU_API_URL"):
+        return [os.environ["OPENHU_API_URL"]]
+    ports = ["5520"]
+    ini = configparser.ConfigParser(interpolation=None, strict=False)
+    try:
+        ini.read(INI)
+        ports.insert(0, ini.get("Api", "Port", fallback="5520"))
+    except (configparser.Error, PermissionError):
+        pass
+    return [f"ws://127.0.0.1:{port}" for port in dict.fromkeys(ports)]
+
+
+def api_url():
+    return API_URL or api_urls()[0]
+
+
+def connect():
+    global API_URL
+    from websockets.sync.client import connect as ws_connect
+    urls = [API_URL] if API_URL else api_urls()
+    for url in urls:
+        try:
+            ws = ws_connect(url, open_timeout=5, max_size=None)
+            API_URL = url
+            return ws
+        except OSError:
+            pass
+    fail(f"OpenHU is not running (no API on {' or '.join(urls)}) – see openhu status, openhu log, openhu restart")
+
+
+def api(method, params=None):
+    with connect() as ws:
+        ws.send(json.dumps({"type": "request", "id": 1, "method": method, "params": params or {}}))
+        while True:
+            reply = json.loads(ws.recv(timeout=15))
+            if reply.get("id") == 1:
+                break
+    if "error" in reply:
+        fail(reply["error"])
+    return reply.get("result")
+
+
+def api_and_wait(method, params, topic, timeout=300):
+    """Calls a method that works in the background and waits until the topic's "busy" went on and off again
+    (subscribed first, so a quick job is not missed); the last value of the topic"""
+    with connect() as ws:
+        ws.send(json.dumps({"type": "subscribe", "topics": [topic]}))
+        ws.send(json.dumps({"type": "request", "id": 1, "method": method, "params": params}))
+        deadline = time.time() + timeout
+        state, busy, answered = {}, False, False
+        while time.time() < deadline:
+            message = json.loads(ws.recv(timeout=max(1, deadline - time.time())))
+            if message.get("id") == 1:
+                if "error" in message:
+                    fail(message["error"])
+                answered = True
+            elif message.get("topic") == topic:
+                state = message.get("data") or {}
+                busy = busy or bool(state.get("busy"))
+                if answered and busy and not state.get("busy"):
+                    return state
+        fail(f"no answer within {timeout} s")
+
+
+def value_text(value):
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if value is None or value == "":
+        return "–"
+    return str(value)
+
+
+# --- commands ---
+
+def cmd_status(args):
+    data = {"os": os_version()}
+    lines = []
+    if data["os"]:
+        line = f"OpenHU OS     {data['os']}"
+        if os.geteuid() == 0:
+            slots = helper("openhu-update", ["status", "--json"])
+            data["slots"] = slots
+            line += f" ({slots['slot']}), other slot: {slots['other'] or 'empty'}"
+        boot = read_json(f"{RUN}/boot-status.json")
+        if boot.get("state") in ("trial", "rollback"):
+            line += f" – {'new version being tried' if boot['state'] == 'trial' else 'update failed, ' + str(boot.get('failed')) + ' rolled back'}"
+        lines.append(line)
+    usb = read_json(f"{RUN}/usb-update.json")
+    if usb.get("version"):
+        data["usb"] = usb
+        lines.append(f"USB stick     OpenHU OS {usb['version']}" + (" – newer: openhu update install" if usb.get("newer") else ""))
+
+    try:
+        api("system.ping")
+    except Failure as e:
+        data["openhu"] = {"running": False, "error": str(e)}
+        lines.append(f"OpenHU        not running ({e})")
+        output(data, lines)
+        return 1
+
+    def optional(method, params=None):
+        """a method an older OpenHU does not have yet: left out"""
+        try:
+            return api(method, params) or {}
+        except Failure:
+            return {}
+    projection = optional("bus.get", {"topic": "projection.state"})
+    transport = optional("bus.get", {"topic": "projection.transport"}).get("transport")
+    wifi = optional("wifi.state")
+    wireless = optional("wireless.state")
+    volume = optional("volume.get")
+    pending = optional("settings.list").get("pending", [])
+    data["openhu"] = {"running": True, "api": api_url(), "pending": pending}
+    data["androidAuto"] = {"connected": bool(projection.get("connected")), "transport": transport}
+    data["wifi"] = wifi
+    data["wireless"] = wireless
+    data["volume"] = volume
+    lines.append(f"OpenHU        running ({api_url()})" + (f", waiting for a {' and a '.join(pending)}" if pending else ""))
+    lines.append("Android Auto  " + (f"connected ({transport or 'usb'})" if projection.get("connected") else "not connected"))
+    client = wifi.get("client") or {}
+    if not wifi.get("available"):
+        lines.append("WiFi          no WiFi card")
+    else:
+        parts = [f"in \"{client['ssid']}\" ({client.get('ip') or 'no address'})" if client.get("ssid") else "no network"]
+        if wireless.get("hotspot") == "on":
+            parts.append(f"hotspot \"{wireless.get('ssid')}\" on {wireless.get('interface')}")
+        lines.append("WiFi          " + ", ".join(parts))
+    lines.append(f"Volume        {volume.get('volume')} %" + (" (muted)" if volume.get("muted") else ""))
+    output(data, lines)
+    return 0
+
+
+# update
+
+def cmd_update(args):
+    ensure_root()
+    if args.action == "status":
+        result = subprocess.run([f"{LIBEXEC}/openhu-update", "status"] + (["--json"] if JSON else []))
+        return result.returncode
+    if args.action == "check":
+        data = helper("openhu-update", ["check", "--json"])
+        text = (f"Update available: {data['current']} → {data['newest']}"
+                + (" (on the USB stick)" if data.get("source") == "usb" else "")
+                + " – openhu update install" if data.get("available") else f"Up to date: {data['current']}")
+        if data.get("server_error"):
+            text += f"\n({data['server_error']})"
+        output(data, text)
+        return 0
+    if args.action == "cancel":
+        data = helper("openhu-update", ["cancel", "--json"])
+        output(data, "Update cancelled, the running version stays." if data.get("cancelled") else "No update running.")
+        return 0
+    # install: always as openhu-update.service, so it survives a closed ssh connection
+    data = helper("openhu-update", ["start", "--json"] + (["--version", args.version] if args.version else []))
+    if args.no_wait:
+        output(data, f"Update started in the background: openhu update status")
+        return 0
+    return follow_update(args.reboot)
+
+
+def follow_update(reboot):
+    shown = None
+    # on a terminal one line that counts up, otherwise (log, pipe) a line per change
+    tty = sys.stdout.isatty() and not JSON
+    time.sleep(0.5)
+    try:
+        while True:
+            state = read_json(f"{RUN}/update.json")
+            current = state.get("state")
+            if current == "installing":
+                line = f"Installing {state.get('version')}: {state.get('percent', 0)} % ({state.get('phase')})"
+                if line != shown and not JSON:
+                    print(("\r" + line) if tty else line, end="" if tty else "\n", flush=True)
+                shown = line
+            elif current in ("done", "uptodate", "error", "cancelled"):
+                break
+            time.sleep(1)
+        if tty and shown:
+            print()
+    except KeyboardInterrupt:
+        output({"state": "running"}, "\nThe update goes on in the background: openhu update status, openhu update cancel")
+        return 0
+    if current == "done":
+        output(state, f"OpenHU OS {state.get('version')} installed, active after a reboot"
+                      + (" – rebooting" if reboot else ": reboot") + f" (back to {state.get('from')} if it does not start)")
+        if reboot:
+            subprocess.run(["systemctl", "reboot"], check=True)
+        return 0
+    if current == "uptodate":
+        output(state, f"Up to date: {state.get('version')}")
+        return 0
+    if current == "cancelled":
+        output(state, "Update cancelled, the running version stays.")
+        return 1
+    fail(state.get("error") or "update failed")
+
+
+# ssh
+
+def ssh_text(data):
+    if not data.get("enabled"):
+        state = "off"
+    else:
+        state = "on" + ("" if data.get("running") else " (starting)")
+    login = [n for n, on in (("password", data.get("password")), ("key", data.get("keys"))) if on]
+    return f"ssh {state}, login as root with " + (" or ".join(login) if login else "nothing yet: openhu ssh password")
+
+
+def cmd_ssh(args):
+    ensure_root()
+    if args.action == "status":
+        data = helper("openhu-ssh", ["status"])
+    elif args.action in ("on", "off"):
+        data = helper("openhu-ssh", ["enable" if args.action == "on" else "disable"])
+    elif args.clear:
+        data = helper("openhu-ssh", ["password", "--clear"])
+    else:
+        if sys.stdin.isatty():
+            password = getpass.getpass("Root password for ssh (at least 8 characters): ")
+            if getpass.getpass("Again: ") != password:
+                fail("the passwords differ")
+        else:
+            password = sys.stdin.readline().rstrip("\n")
+        data = helper("openhu-ssh", ["password"], stdin=password + "\n")
+    output(data, ssh_text(data))
+    return 0
+
+
+# time
+
+def time_text(data):
+    clock = datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    source = ("from the internet" + (", synchronized" if data.get("synchronized") else ", not synchronized yet")
+              if data.get("ntp") else "set by hand")
+    return f"{clock}, time zone {data.get('zone')}, {source}"
+
+
+def parse_time(text):
+    """seconds since 1970 or a local date and time: 2026-10-13 14:30[:00]"""
+    if text.isdigit():
+        return int(text)
+    for form in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+        try:
+            return int(time.mktime(time.strptime(text, form)))
+        except ValueError:
+            pass
+    fail(f"not a time: {text} (e.g. \"2026-10-13 14:30\")")
+
+
+def cmd_time(args):
+    if args.action == "zones":
+        from zoneinfo import available_timezones
+        zones = sorted(z for z in available_timezones() if "/" in z and not z.startswith(("Etc/", "SystemV/", "posix/", "right/"))) + ["UTC"]
+        output(zones, zones)
+        return 0
+    ensure_root()
+    if args.action == "status":
+        data = helper("openhu-time", ["status"])
+    elif args.action == "zone":
+        data = helper("openhu-time", ["zone", args.value[0]] if args.value else ["status"])
+    elif args.action == "ntp":
+        if args.value[:1] not in (["on"], ["off"]):
+            fail("time ntp on|off")
+        data = helper("openhu-time", ["ntp", args.value[0]])
+    else:
+        if not args.value:
+            fail("time set \"2026-10-13 14:30\"")
+        data = helper("openhu-time", ["set", str(parse_time(" ".join(args.value)))])
+    # a new zone applies to this process only after a reload
+    time.tzset()
+    output(data, time_text(data))
+    return 0
+
+
+# settings
+
+APPLIES = {"now": "", "reconnect": " – applies with the next Android Auto connection",
+           "restart": " – applies after a restart of OpenHU: openhu restart"}
+
+
+def key_help(key, schema):
+    kind = schema.get("type")
+    if kind == "choice":
+        allowed = " | ".join(str(c) for c in schema.get("choices", []))
+    elif kind == "int":
+        allowed = f"{schema.get('min')}–{schema.get('max')}"
+    elif kind == "bool":
+        allowed = "on | off"
+    else:
+        allowed = "text" + (f" (at most {schema['maxLength']})" if schema.get("maxLength") else "")
+    flags = [f for f, on in (("read-only", schema.get("readOnly")), ("secret", schema.get("secret"))) if on]
+    return allowed + (f" [{', '.join(flags)}]" if flags else "")
+
+
+def cmd_config(args):
+    if args.action == "list":
+        data = api("settings.list")
+        values = {k: v for k, v in sorted(data["values"].items()) if not args.key or k.startswith(args.key)}
+        width = max((len(k) for k in values), default=0)
+        lines = [f"{k.ljust(width)}  {value_text(v)}" for k, v in values.items()]
+        if data.get("pending"):
+            lines.append(f"\nWaiting for a {' and a '.join(data['pending'])}.")
+        output({"values": values, "pending": data.get("pending", [])}, lines)
+    elif args.action == "keys":
+        keys = api("settings.keys")
+        keys = {k: v for k, v in sorted(keys.items()) if not args.key or k.startswith(args.key)}
+        width = max((len(k) for k in keys), default=0)
+        output(keys, [f"{k.ljust(width)}  {key_help(k, v)}" for k, v in keys.items()])
+    elif args.action == "get":
+        data = api("settings.get", {"key": args.key})
+        output(data, value_text(data["value"]))
+    else:
+        data = api("settings.set", {"key": args.key, "value": args.value})
+        shown = value_text(data["value"]) if "value" in data else "(set)"
+        output(data, f"{args.key} = {shown}{APPLIES.get(data.get('applies'), '')}")
+    return 0
+
+
+# OpenHU
+
+def cmd_page(args):
+    api("ui.navigate", {"page": args.page})
+    output({"page": args.page}, None)
+    return 0
+
+
+def cmd_action(args):
+    if args.list or not args.name:
+        actions = api("input.actions")
+        width = max((len(k) for k in actions), default=0)
+        output(actions, [f"{k.ljust(width)}  {v}" for k, v in sorted(actions.items())])
+        return 0
+    data = api("input.action", {"action": args.name, "phase": args.phase})
+    output(data, None if data.get("handled") else f"{args.name}: published as input.action (no built-in action)")
+    return 0
+
+
+def cmd_volume(args):
+    value = args.value
+    if value is None:
+        data = api("volume.get")
+    elif value in ("mute", "unmute"):
+        data = api("volume.mute", {"muted": value == "mute"})
+    elif value[0] in "+-" and value[1:].isdigit():
+        data = api("volume.change", {"delta": int(value)})
+    elif value.isdigit() and 0 <= int(value) <= 100:
+        data = api("volume.set", {"value": int(value)})
+    else:
+        fail("volume: 0–100, +5, -5, mute or unmute")
+    output(data, f"{data['volume']} %" + (" (muted)" if data.get("muted") else ""))
+    return 0
+
+
+def cmd_toast(args):
+    api("ui.toast", {"text": " ".join(args.text), "duration": int(args.seconds * 1000)})
+    output({}, None)
+    return 0
+
+
+def cmd_daynight(args):
+    data = api("settings.set", {"key": "aa.nightMode", "value": args.mode})
+    output(data, {"auto": "Day and night from the light sensor or the time", "day": "Always day",
+                  "night": "Always night"}[args.mode])
+    return 0
+
+
+def cmd_plugin(args):
+    if args.action == "list":
+        plugins = api("plugin.list") or []
+        lines = [f"{p['id']}  {p.get('version', '')}  {'running' if p.get('running') else 'enabled' if p.get('enabled') else 'off'}"
+                 f"  {p.get('name', '')}" for p in plugins]
+        output(plugins, lines or "No plugins installed (openhu store list).")
+    else:
+        data = api(f"plugin.{args.action}", {"id": args.id})
+        output(data, f"{args.id}: {args.action}d" if args.action != "restart" else f"{args.id} restarted")
+    return 0
+
+
+def cmd_store(args):
+    if args.action == "list":
+        packages = api("store.list") or []
+        lines = []
+        for p in packages:
+            state = ("update " + str(p.get("version")) if p.get("updateAvailable")
+                     else "installed" if p.get("installed") else "")
+            lines.append(f"{p['id']}  {p.get('version', '')}  {state}  {p.get('name', '')}")
+        output(packages, lines or "The store is empty: openhu store refresh")
+        return 0
+    params = {"id": args.id} if args.id else {}
+    if args.action in ("install", "remove") and not args.id:
+        fail(f"store {args.action}: which plugin? (openhu store list)")
+    # the store works in the background, store.state says when it is done
+    state = api_and_wait(f"store.{args.action}", params, "store.state")
+    if state.get("error"):
+        fail(state["error"])
+    output(state, state.get("status") or "done")
+    return 0
+
+
+def cmd_bt(args):
+    if args.action == "devices":
+        devices = api("bluetooth.devices") or []
+        output(devices, [f"{d['address']}  {'connected' if d.get('connected') else '         '}  {d.get('name', '')}"
+                         for d in devices] or "No paired devices.")
+    elif args.action == "search":
+        data = api("bluetooth.search", {"seconds": args.seconds})
+        output(data, f"Searching for {args.seconds} s, the phone finds OpenHU now too.")
+    else:
+        if not args.address:
+            fail(f"bt {args.action}: which device? (openhu bt devices)")
+        data = api(f"bluetooth.{args.action}", {"address": args.address})
+        output(data, f"{args.address}: {args.action}")
+    return 0
+
+
+def cmd_wifi(args):
+    if args.action == "list":
+        state = api("wifi.state") or {}
+        client = state.get("client") or {}
+        lines = [f"{'*' if n.get('active') else ' '} {n['ssid']}" + ("" if n.get("joined") else "  (never connected)")
+                 for n in state.get("networks", [])]
+        if state.get("found"):
+            lines.append("\nIn range:")
+            lines += [f"  {f['ssid']}  {f.get('signal')} %{'  saved' if f.get('known') else ''}" for f in state["found"]]
+        output(state, [f"Connected to \"{client['ssid']}\"" if client.get("ssid") else "Not connected"] + lines)
+        return 0
+    if args.action == "scan":
+        api("wifi.scan")
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            time.sleep(1)
+            state = api("wifi.state") or {}
+            if not state.get("scanning"):
+                break
+        args.action = "list"
+        return cmd_wifi(args)
+    if not args.ssid:
+        fail(f"wifi {args.action}: which network?")
+    if args.action == "add":
+        password = args.password
+        if password is None and sys.stdin.isatty():
+            password = getpass.getpass(f"Password of \"{args.ssid}\" (empty for an open network): ")
+        api("wifi.add", {"ssid": args.ssid, "password": password or "", "hidden": args.hidden})
+        output({"ssid": args.ssid}, f"\"{args.ssid}\" saved, connecting.")
+        return 0
+    networks = (api("wifi.state") or {}).get("networks", [])
+    match = [n for n in networks if n["ssid"] == args.ssid or n.get("uuid") == args.ssid]
+    if not match:
+        fail(f"no saved network \"{args.ssid}\" (openhu wifi list)")
+    method = {"connect": "wifi.connect", "remove": "wifi.remove", "up": "wifi.moveUp"}[args.action]
+    api(method, {"uuid": match[0]["uuid"]})
+    output({"ssid": args.ssid}, None)
+    return 0
+
+
+def cmd_api(args):
+    if args.method == "methods":
+        methods = api("system.methods")
+        output(methods, methods)
+        return 0
+    try:
+        params = json.loads(args.params) if args.params else {}
+    except ValueError as e:
+        fail(f"params: not JSON ({e})")
+    result = api(args.method, params)
+    print(json.dumps(result, ensure_ascii=False, indent=None if JSON else 2))
+    return 0
+
+
+def cmd_watch(args):
+    topics = args.topics or ["*"]
+    with connect() as ws:
+        ws.send(json.dumps({"type": "subscribe", "topics": topics}))
+        try:
+            while True:
+                message = json.loads(ws.recv())
+                if message.get("type") != "event":
+                    continue
+                if JSON:
+                    print(json.dumps({"topic": message["topic"], "data": message.get("data")}, ensure_ascii=False), flush=True)
+                else:
+                    print(f"{time.strftime('%H:%M:%S')} {message['topic']} {json.dumps(message.get('data'), ensure_ascii=False)}", flush=True)
+        except KeyboardInterrupt:
+            return 0
+
+
+def cmd_restart(args):
+    ensure_root()
+    subprocess.run(["systemctl", "restart", SESSION], check=True)
+    output({"restarted": True}, "OpenHU restarted.")
+    return 0
+
+
+def cmd_log(args):
+    command = ["journalctl", "-u", SESSION, "-n", str(args.lines)] + (["-f"] if not args.no_follow else ["--no-pager"])
+    return subprocess.run(command).returncode
+
+
+# --- completion ("openhu complete <words>", used by /usr/share/bash-completion/completions/openhu) ---
+
+def cmd_complete(args, parser):
+    words = args.words
+    current = words[-1] if words else ""
+    done = words[:-1]
+    commands = subparsers_of(parser)
+    if not done:
+        candidates = list(commands)
+    elif done[0] == "help":
+        candidates = list(commands) if len(done) == 1 else []
+    else:
+        sub = commands.get(done[0])
+        candidates = []
+        if sub is not None:
+            # the fixed choices of the argument at this place (update install, time zone, ...), else live values
+            positionals = [a for a in sub._actions if not a.option_strings]
+            position = len([w for w in done[1:] if not w.startswith("-")])
+            if position < len(positionals) and positionals[position].choices:
+                candidates = list(positionals[position].choices)
+            else:
+                candidates = complete_values([w for w in done if not w.startswith("-")])
+            if current.startswith("-"):
+                candidates = [o for a in sub._actions for o in a.option_strings] + ["--json"]
+    print("\n".join(c for c in candidates if c.startswith(current)))
+    return 0
+
+
+def complete_values(done):
+    """Values after the command (and its action), quietly empty without OpenHU"""
+    command, rest = done[0], done[1:]
+    try:
+        if command == "page":
+            plugins = api("plugin.list") or []
+            return PAGES + ["plugin:" + p["id"] for p in plugins]
+        if command == "action":
+            return list(api("input.actions") or {})
+        if command == "config" and rest and rest[0] in ("get", "set") and len(rest) == 1:
+            return list(api("settings.keys") or {})
+        if command == "config" and rest and rest[0] == "set" and len(rest) == 2:
+            schema = (api("settings.keys") or {}).get(rest[1], {})
+            return [str(c) for c in schema.get("choices", [])] + (["on", "off"] if schema.get("type") == "bool" else [])
+        if command == "plugin" and len(rest) == 1:
+            return [p["id"] for p in api("plugin.list") or []]
+        if command == "store" and len(rest) == 1:
+            return [p["id"] for p in api("store.list") or []]
+        if command == "bt" and len(rest) == 1:
+            return [d["address"] for d in api("bluetooth.devices") or []]
+        if command == "wifi" and len(rest) == 1 and rest[0] in ("connect", "remove", "up"):
+            return [n["ssid"] for n in (api("wifi.state") or {}).get("networks", [])]
+        if command == "time" and rest == ["zone"]:
+            from zoneinfo import available_timezones
+            return sorted(available_timezones())
+        if command == "time" and rest == ["ntp"]:
+            return ["on", "off"]
+        if command == "volume" and not rest:
+            return ["mute", "unmute", "+5", "-5"]
+        if command == "daynight" and not rest:
+            return ["auto", "day", "night"]
+        if command == "api" and not rest:
+            return list(api("system.methods") or []) + ["methods"]
+        if command == "watch":
+            return list(api("bus.topics") or [])
+    except Failure:
+        pass
+    return []
+
+
+def subparsers_of(parser):
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return {name: sub for name, sub in action.choices.items() if name != "complete"}
+    return {}
+
+
+# --- arguments ---
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="openhu", description="The command line of OpenHU OS.",
+                                     epilog="openhu help <command> explains a command; --json: output for scripts.")
+    commands = parser.add_subparsers(dest="command", metavar="<command>")
+
+    def command(name, help, func, **kwargs):
+        sub = commands.add_parser(name, help=help, description=help, **kwargs)
+        sub.set_defaults(func=func)
+        return sub
+
+    command("status", "OS version, update slots, OpenHU, Android Auto, WiFi", cmd_status)
+
+    sub = command("update", "system update, online or from a USB stick", cmd_update)
+    sub.add_argument("action", choices=["status", "check", "install", "cancel"], nargs="?", default="status")
+    sub.add_argument("--version", help="install this version instead of the newest")
+    sub.add_argument("--reboot", action="store_true", help="reboot when installed")
+    sub.add_argument("--no-wait", action="store_true", help="start it in the background and return")
+
+    sub = command("ssh", "ssh access as root", cmd_ssh)
+    sub.add_argument("action", choices=["status", "on", "off", "password"], nargs="?", default="status")
+    sub.add_argument("--clear", action="store_true", help="with password: remove it (login with a key only)")
+
+    sub = command("time", "time zone, date and time", cmd_time)
+    sub.add_argument("action", choices=["status", "zone", "zones", "ntp", "set"], nargs="?", default="status")
+    sub.add_argument("value", nargs="*", help="zone: Europe/Berlin; ntp: on|off; set: \"2026-10-13 14:30\"")
+
+    sub = command("config", "settings of OpenHU (keys like in the settings page)", cmd_config)
+    sub.add_argument("action", choices=["list", "keys", "get", "set"], nargs="?", default="list")
+    sub.add_argument("key", nargs="?", help="list/keys: only keys starting with it; get/set: the key")
+    sub.add_argument("value", nargs="?", help="set: the new value (on/off for switches)")
+
+    sub = command("page", "show a page: " + ", ".join(PAGES[:4]) + ", settings/<category>, plugin:<id>", cmd_page)
+    sub.add_argument("page")
+
+    sub = command("action", "trigger an action like a steering wheel button (media.next, ui.back, ...)", cmd_action)
+    sub.add_argument("name", nargs="?")
+    sub.add_argument("--list", action="store_true", help="the built-in actions")
+    sub.add_argument("--phase", choices=["click", "press", "release"], default="click")
+
+    sub = command("volume", "show or change the volume: 0-100, +5, -5, mute, unmute", cmd_volume)
+    sub.add_argument("value", nargs="?")
+
+    sub = command("toast", "show a short message on the screen", cmd_toast)
+    sub.add_argument("text", nargs="+")
+    sub.add_argument("--seconds", type=float, default=3)
+
+    sub = command("daynight", "Android Auto day/night: auto (light sensor/time), day, night", cmd_daynight)
+    sub.add_argument("mode", choices=["auto", "day", "night"])
+
+    sub = command("plugin", "installed plugins", cmd_plugin)
+    sub.add_argument("action", choices=["list", "enable", "disable", "restart"], nargs="?", default="list")
+    sub.add_argument("id", nargs="?")
+
+    sub = command("store", "plugin store: list, refresh, install, update, remove", cmd_store)
+    sub.add_argument("action", choices=["list", "refresh", "install", "update", "remove"], nargs="?", default="list")
+    sub.add_argument("id", nargs="?")
+
+    sub = command("bt", "Bluetooth devices", cmd_bt)
+    sub.add_argument("action", choices=["devices", "search", "pair", "connect", "remove"], nargs="?", default="devices")
+    sub.add_argument("address", nargs="?")
+    sub.add_argument("--seconds", type=int, default=30)
+
+    sub = command("wifi", "WiFi networks OpenHU joins", cmd_wifi)
+    sub.add_argument("action", choices=["list", "scan", "add", "connect", "remove", "up"], nargs="?", default="list")
+    sub.add_argument("ssid", nargs="?")
+    sub.add_argument("--password", help="add: else asked (empty for an open network)")
+    sub.add_argument("--hidden", action="store_true", help="add: the network does not show its name")
+
+    sub = command("api", "call an API method: openhu api volume.set '{\"value\": 40}'; openhu api methods", cmd_api)
+    sub.add_argument("method")
+    sub.add_argument("params", nargs="?", help="JSON object")
+
+    sub = command("watch", "print events live (topics like nav.* media.metadata, default all)", cmd_watch)
+    sub.add_argument("topics", nargs="*")
+
+    command("restart", "restart OpenHU", cmd_restart)
+
+    sub = command("log", "OpenHU's log (follows it, Ctrl+C ends)", cmd_log)
+    sub.add_argument("-n", "--lines", type=int, default=100)
+    sub.add_argument("--no-follow", action="store_true")
+
+    sub = command("help", "this help, or the help of a command", None)
+    sub.add_argument("topic", nargs="?")
+
+    sub = commands.add_parser("complete")  # for the bash completion, not listed
+    sub.add_argument("words", nargs="*")
+    return parser
+
+
+def main(argv):
+    global JSON
+    JSON = "--json" in argv
+    argv = [a for a in argv if a != "--json"]
+    parser = build_parser()
+    # "complete" takes the words as they are, options included
+    if argv[:1] == ["complete"]:
+        return cmd_complete(argparse.Namespace(words=argv[1:]), parser)
+    args = parser.parse_args(argv)
+    if args.command in (None, "help"):
+        topic = getattr(args, "topic", None)
+        commands = subparsers_of(parser)
+        if topic in commands:
+            commands[topic].print_help()
+        else:
+            parser.print_help()
+        return 0
+    try:
+        return args.func(args) or 0
+    except Failure as e:
+        if JSON:
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"openhu: {e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
