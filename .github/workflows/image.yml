@@ -1,6 +1,6 @@
 # Builds the OpenHU OS images with the newest OpenHU from its CI, tests the dev image in a VM (KVM, power cuts) and
 # builds the release image. A tag v<version> (digits and dots, e.g. v2026.10.13) publishes it as a GitHub release:
-# the disk image to flash and the update that openhu-update installs (releases/latest/download/).
+# the disk image to flash and the update that "openhu update" installs (releases/latest/download/).
 name: Image
 
 on:
@@ -91,7 +91,7 @@ jobs:
             echo "**New installation:** \`xz -d openhu-os_$VERSION.raw.xz\`, write it to the disk or SD card"
             echo "(\`dd\`, balenaEtcher). It grows to the whole disk on the first boot."
             echo
-            echo "**Update** of a running OpenHU OS: \`openhu-update update --reboot\` (root partition and kernel"
+            echo "**Update** of a running OpenHU OS: \`openhu update install --reboot\` (root partition and kernel"
             echo "image of this release, back to the version before if OpenHU does not come up)."
             echo
             echo "**Without internet:** copy \`SHA256SUMS\`, \`openhu-os_$VERSION.root.raw.gz\` and"

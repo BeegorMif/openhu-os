@@ -1,0 +1,10 @@
+# Tab completion of openhu: the words come from "openhu complete" (commands, and live from OpenHU setting keys,
+# pages, actions, plugins, ...)
+_openhu() {
+    local IFS=$'\n' cur
+    # plugin:<id> and the like stay one word
+    _get_comp_words_by_ref -n : cur 2>/dev/null || cur="${COMP_WORDS[COMP_CWORD]}"
+    COMPREPLY=($(openhu complete "${COMP_WORDS[@]:1:COMP_CWORD-1}" "$cur" 2>/dev/null))
+    declare -F __ltrim_colon_completions >/dev/null && __ltrim_colon_completions "$cur"
+}
+complete -F _openhu openhu

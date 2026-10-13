@@ -29,11 +29,11 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
   with a real logo any time. `scripts/build.sh` packages the theme as `openhu-os-splash`.
 - **Small initrd:** only the modules mkosi's initrd needs (54 MB unified kernel image instead of 136 MB)
 
-- **A/B updates:** `openhu-update` writes a new version into the other root slot and its unified kernel image into
+- **A/B updates:** `openhu update` writes a new version into the other root slot and its unified kernel image into
   the ESP with three boot tries (systemd-boot boot counting). The new version is kept when OpenHU comes up
   (`openhu-boot-check.service`, then `systemd-bless-boot`); after three failed tries systemd-boot boots the version
   before again. A power cut during an update leaves the running version bootable. No automatic updates: Install in
-  OpenHU (Settings → System) or `openhu-update update` starts one, online or from a USB stick.
+  OpenHU (Settings → System) or `openhu update install` starts one, online or from a USB stick.
   The splash says when a new version is being tried ("try 1 of 3") and when a failed update was rolled back;
   `/run/openhu-os/boot-status.json` has the same for OpenHU (`normal`, `trial`, `updated` once the new version
   passed its boot check, `rollback`).
@@ -44,16 +44,42 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): signed checksums
 ([#21](https://github.com/average-web-dev/openhu-os/issues/21)), Raspberry Pi 4/5.
 
+## The openhu command
+
+One command for the system, the settings of OpenHU and the running OpenHU (through its API on
+`ws://127.0.0.1:<api port>`); Tab completes commands and, live from OpenHU, setting keys, pages, actions and plugins:
+
+```bash
+openhu help                         # all commands; openhu help <command> explains one
+openhu status                       # OS version and update slots, OpenHU, Android Auto, WiFi, volume
+openhu update check | install [--reboot] | status | cancel
+openhu ssh status | on | off | password [--clear]
+openhu time status | zone Europe/Berlin | zones | ntp on|off | set "2026-10-13 14:30"
+openhu config list [prefix] | keys | get aa.fps | set aa.fps 60     # says when a reconnect or restart is needed
+openhu page settings/system         # like tapping the dock: home, aa, settings[/<category>], store, plugin:<id>
+openhu action media.next            # like a steering wheel button; openhu action --list
+openhu volume 40 | +5 | -5 | mute   # openhu toast "Hello", openhu daynight auto|day|night
+openhu plugin list | restart <id>   # openhu store list | install <id>, openhu bt devices, openhu wifi list | scan
+openhu api volume.set '{"value": 40}'   # any API method; openhu api methods
+openhu watch nav.* media.metadata   # events live
+openhu log | restart                # OpenHU's log (journal of openhu-session), restart it
+```
+
+`--json` gives every command's result as JSON for scripts; errors end with exit code 1 (`{"error": ...}`). Without
+a running OpenHU the system commands still work, the others say so. The system commands (`update`, `ssh`, `time`,
+`restart`) need root: the `openhu` user runs them through `pkexec` (the polkit rule allows exactly these, OpenHU's
+settings use them so), `openhu` does that by itself. The work is done by helpers in `/usr/libexec/openhu-os`
+(`openhu-update`, `openhu-ssh`, `openhu-time`), which are not meant to be called directly.
+
 ## ssh
 
 Off in the release image. OpenHU switches it on and sets root's password
-([openhu#29](https://github.com/average-web-dev/openhu/issues/29)) through a small helper that the `openhu` user may
-run as root with `pkexec` (polkit rule, this program only):
+([openhu#29](https://github.com/average-web-dev/openhu/issues/29)) with `openhu ssh`:
 
 ```bash
-pkexec /usr/libexec/openhu-os/openhu-ssh status        # {"enabled", "running", "password", "keys"}
-echo 'secret-password' | pkexec /usr/libexec/openhu-os/openhu-ssh password   # at least 8 characters
-pkexec /usr/libexec/openhu-os/openhu-ssh enable        # now and at every boot; disable switches it off
+openhu ssh status --json                   # {"enabled", "running", "password", "keys"}
+echo 'secret-password' | openhu ssh password   # at least 8 characters (asked twice on a terminal)
+openhu ssh on                              # now and at every boot; off switches it off
 ```
 
 Everything is on the data partition (`/etc` is read-only): the switch `/var/lib/openhu-os/ssh/enabled`, the
@@ -64,26 +90,26 @@ After the login a greeting shows the version, the result of the last update and 
 
 ## Time zone, date and time
 
-Set in OpenHU (Settings → System, [openhu#36](https://github.com/average-web-dev/openhu/issues/36)) through
-`openhu-time`, the same way as ssh:
+Set in OpenHU (Settings → System, [openhu#36](https://github.com/average-web-dev/openhu/issues/36)) with
+`openhu time`:
 
 ```bash
-pkexec /usr/libexec/openhu-os/openhu-time status              # {"zone", "ntp", "synchronized", "time"}
-pkexec /usr/libexec/openhu-os/openhu-time zone Europe/Berlin  # applies at once, also to running programs
-pkexec /usr/libexec/openhu-os/openhu-time ntp off             # time from the internet (systemd-timesyncd) off
-pkexec /usr/libexec/openhu-os/openhu-time set 1791820800      # seconds since 1970 (UTC), only with ntp off
+openhu time status --json            # {"zone", "ntp", "synchronized", "time"}
+openhu time zone Europe/Berlin       # applies at once, also to running programs
+openhu time ntp off                  # time from the internet (systemd-timesyncd) off
+openhu time set "2026-10-13 14:30"   # local time (or seconds since 1970), only with ntp off
 ```
 
 `/etc/localtime` links to `/var/lib/openhu-os/time/localtime`, which links to the zone (UTC until one is
 chosen). glibc and Qt follow both links; `timedatectl` does not and shows the zone as "n/a", `date` and
-`openhu-time status` show it right. Time from the internet is on by default; switched off, the flag
+`openhu time` show it right. Time from the internet is on by default; switched off, the flag
 `/var/lib/openhu-os/time/ntp-off` keeps systemd-timesyncd from starting. Setting the time also sets the hardware
 clock. A Raspberry Pi 4 has none: after a power cut without internet it starts at the last time systemd saved.
 
 ## Releases
 
 [GitHub releases](https://github.com/average-web-dev/openhu-os/releases): `openhu-os_<version>.raw.xz` to flash
-(`xz -d`, then `dd` or balenaEtcher; grows to the whole disk on the first boot), the update for `openhu-update`
+(`xz -d`, then `dd` or balenaEtcher; grows to the whole disk on the first boot), the update for `openhu update`
 (`openhu-os_<version>.root.raw.gz`, `openhu-os_<version>.efi`), the package manifest and `SHA256SUMS`.
 
 ### Update from a USB stick
@@ -126,14 +152,14 @@ Profiles:
 |---|---|---|
 | ssh | always on: root with the key in `local/id_ed25519` (`scripts/ssh.sh`), password `openhu` | off until switched on in OpenHU (below) |
 | Console | serial (`ttyS0`), Ctrl+Alt+F2 switches away from cage | none |
-| Tools | `grim` (screenshots), strace, libinput-tools, … | none (`openhu-api` and `openhu-update` in both) |
+| Tools | `grim` (screenshots), strace, libinput-tools, … | none (`openhu` in both) |
 
 ## Run in a VM
 
 ```bash
 scripts/run-vm.sh --fresh       # new VM disk from the newest image, window with 3D
 scripts/ssh.sh                  # root shell in the VM
-scripts/ssh.sh openhu-api system.ping
+scripts/ssh.sh openhu status
 scripts/screenshot.sh           # vm/screen.png (grim in the guest)
 ```
 
@@ -153,9 +179,9 @@ The VM disk (`vm/disk.raw`, 16 GB sparse) keeps its data until `--fresh`.
 scripts/build.sh --version 2026.10.13.1        # a newer version
 scripts/add-update.sh                          # newest build into mkosi.output/updates (root partition, UKI, SHA256SUMS)
 scripts/serve-updates.sh                       # http://127.0.0.1:8070, the dev image's update server
-scripts/ssh.sh openhu-update check
-scripts/ssh.sh openhu-update update --reboot
-scripts/ssh.sh openhu-update status            # slots and boot entries: good, n tries left, failed
+scripts/ssh.sh openhu update check
+scripts/ssh.sh openhu update install --reboot
+scripts/ssh.sh openhu update status            # slots and boot entries: good, n tries left, failed
 ```
 
 A USB stick for the running VM (`--instance NAME` for a second VM):
@@ -167,7 +193,9 @@ scripts/usb-stick.sh pull
 ```
 
 `run-vm.sh --fresh --image mkosi.output/openhu-os_<version>.raw` starts from an older version. Debian has no
-`systemd-sysupdate`, so `openhu-update` (`/usr/libexec/openhu-os`, Python) does the job:
+`systemd-sysupdate`, so `openhu update` (helper `/usr/libexec/openhu-os/openhu-update`, Python) does the job,
+always in the background as `openhu-update.service` (survives a closed ssh connection and OpenHU restarts;
+`install` shows the progress until it is done, Ctrl+C only stops watching):
 
 1. removes the boot entry of the version in the other slot and labels the slot `_empty`
 2. streams `openhu-os_<version>.root.raw.gz` into the slot, checks the SHA-256, labels it `openhu_<version>`
@@ -178,20 +206,19 @@ Release images use the newest GitHub release (`/usr/lib/openhu-os/update.conf`, 
 ([#21](https://github.com/average-web-dev/openhu-os/issues/21)).
 
 USB sticks are a second source (`openhu-usb@<name>.service`, started by udev, mounts them and runs
-`openhu-update scan`). `check` and `update` take the newest version of both, the stick on a tie; without internet a
+`openhu-update scan`). `check` and `install` take the newest version of both, the stick on a tie; without internet a
 stick is enough (`server_error` in `check --json`). A stick pulled during the update: error "the USB stick was
 removed", the slot is empty again.
 
-**For OpenHU** (the update button, [openhu#28](https://github.com/average-web-dev/openhu/issues/28)): the `openhu`
-user runs it with `pkexec` (polkit allows this program), every command answers in JSON with `--json`:
+**For OpenHU** (the update button, [openhu#28](https://github.com/average-web-dev/openhu/issues/28)), in JSON:
 
 ```bash
-pkexec /usr/libexec/openhu-os/openhu-update status --json   # running, other, entries (good/trying/failed), update, active
-pkexec /usr/libexec/openhu-os/openhu-update check --json    # {"current", "newest", "available", "source": "usb" | "online"}
-pkexec /usr/libexec/openhu-os/openhu-update start --json    # runs as openhu-update.service, survives OpenHU restarts
-pkexec /usr/libexec/openhu-os/openhu-update cancel --json   # the slot is empty again, the running version stays
-cat /run/openhu-os/update.json                              # progress, no root needed
-cat /run/openhu-os/usb-update.json                          # newest version on the sticks: {"current", "version", "newer", "path"}
+openhu update status --json                    # running, other, entries (good/trying/failed), update, active, usb
+openhu update check --json                     # {"current", "newest", "available", "source": "usb" | "online"}
+openhu update install --no-wait --json         # starts openhu-update.service and returns ({"started": true})
+openhu update cancel --json                    # the slot is empty again, the running version stays
+cat /run/openhu-os/update.json                 # progress, no root needed
+cat /run/openhu-os/usb-update.json             # newest version on the sticks: {"current", "version", "newer", "path"}
 ```
 
 `update.json`: `{"state": "checking" | "installing" | "done" | "uptodate" | "error" | "cancelled", "from", "version",
@@ -235,8 +262,8 @@ host first (e.g. the openhu dev container), they would grab the phone.
 mkosi.conf, mkosi.conf.d/   distribution, packages (base, session, openhu, kernel)
 mkosi.profiles/             dev and release
 mkosi.repart/               partitions of the image: ESP, root slot A (erofs, also split out as the update)
-mkosi.extra/                files in the image: session unit, sysusers, PAM, polkit, presets, journald, openhu-api,
-                            first boot partitions (usr/lib/repart.d: slot B, data), fstab for /var, openhu-update,
+mkosi.extra/                files in the image: session unit, sysusers, PAM, polkit, presets, journald, the openhu
+                            command and its helpers, first boot partitions (usr/lib/repart.d: slot B, data), fstab for /var,
                             boot check, USB sticks (udev rule, openhu-usb@.service)
 mkosi.postinst.chroot       users, masks the package's openhu.service (root, eglfs) until openhu#8
 mkosi.finalize              empty machine id (read-only /etc)
