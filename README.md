@@ -22,7 +22,8 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
   (`openhu-session.service`), no desktop. Debian's Qt 6 has no eglfs.
 - **User:** `openhu` (UID 900), home `/var/lib/openhu` with `openhu.ini` and `~/.openhu` (plugins, logs)
 - **Audio:** PipeWire as the `openhu` user (lingering), realtime priority through rtkit, `pactl` works for OpenHU
-- **Network:** NetworkManager (also the wireless Android Auto hotspot), BlueZ
+- **Network:** NetworkManager (also the wireless Android Auto hotspot), BlueZ; the Ethernet port as DHCP client or
+  DHCP server for devices in the car (below); the head unit is `openhu.local` (avahi)
 - **Journal:** in RAM only (32 MB)
 - **Boot splash:** Plymouth with the OpenHU logo on the shell's background (`splash/`), from early in the initrd until
   cage takes over the display. The images are rendered by `splash/make-images.sh`; replace `splash/theme/logo.png`
@@ -65,11 +66,13 @@ openhu-cli watch nav.* media.metadata   # events live
 openhu-cli log | start | stop | restart # OpenHU's log (journal of openhu-session), start/stop/restart it
 ```
 
+`openhu-cli ethernet status | mode client|server` sets the Ethernet port (see Ethernet).
+
 `--json` gives every command's result as JSON for scripts; errors end with exit code 1 (`{"error": ...}`). Without
-a running OpenHU the system commands still work, the others say so. The system commands (`update`, `ssh`, `time`,
-`start`, `stop`, `restart`) need root: the `openhu` user runs `update`, `ssh`, `time` and `restart` through `pkexec`
+a running OpenHU the system commands still work, the others say so. The system commands (`update`, `ssh`, `time`, `ethernet`,
+`start`, `stop`, `restart`) need root: the `openhu` user runs `update`, `ssh`, `time`, `ethernet` and `restart` through `pkexec`
 (the polkit rule allows exactly these, OpenHU's settings use them so), `openhu-cli` does that by itself. The work is
-done by helpers in `/usr/libexec/openhu-os` (`openhu-update`, `openhu-ssh`, `openhu-time`), which are not meant to be
+done by helpers in `/usr/libexec/openhu-os` (`openhu-update`, `openhu-ssh`, `openhu-time`, `openhu-ethernet`), which are not meant to be
 called directly.
 
 OpenHU itself (`/usr/libexec/openhu/openhu`) is not in PATH: `openhu-session.service` runs it in cage, `openhu-cli
@@ -95,6 +98,32 @@ The password is only for the network: the consoles open a root shell without a l
 the head unit has physical access anyway).
 After the login a greeting shows the version, the result of the last update and the most useful commands
 (`/etc/update-motd.d/10-openhu-os`).
+
+## Ethernet
+
+One setting in OpenHU (Settings → Network → Ethernet) with `openhu ethernet`, for the onboard port and USB-Ethernet
+adapters ([#15](https://github.com/average-web-dev/openhu-os/issues/15)):
+
+```bash
+openhu-cli ethernet status --json      # {"mode", "address", "serverAllowed", "devices", "clients"}
+openhu-cli ethernet mode client        # default: asks a router on the cable for an address (workshop, mobile router)
+openhu-cli ethernet mode server        # hands out addresses to devices in the car
+```
+
+- **Client** (default): DHCP, also IPv6; keeps asking until a router answers. Its route comes after WiFi (metric 700).
+- **Server**: the head unit is `10.42.1.1/24` and `openhu.local`, devices get `10.42.1.10`–`254` (NetworkManager's
+  dnsmasq, leases in `/var/lib/NetworkManager/dnsmasq-<port>.leases`); the hotspot keeps `10.42.0.0/24`. Only on one
+  port at a time. Devices reach only the head unit: nothing is forwarded to or from them
+  (`openhu-ethernet-firewall.service`, `/usr/lib/openhu-os/ethernet.nft`), even when the head unit is online.
+- There are never two DHCP servers on one network: `server` is refused while a port in client mode got an address
+  from another DHCP server.
+- The API: devices on the cable reach it once "Share the API in the network" is on in OpenHU, always with the API
+  token (OpenHU's `docs/api.md`), at `ws://openhu.local:5520`.
+
+The profile `openhu-ethernet` comes from `/usr/lib/NetworkManager/system-connections`; a mode change makes
+NetworkManager keep its changed copy (same uuid) in `/var/lib/NetworkManager/system-connections`. The dev image keeps
+the VM's own network (QEMU's MAC `52:54:00:12:34:56`) in a profile of its own (`vm-uplink`), so the mode can be tried
+on a second card: `scripts/run-vm.sh --eth2 PORT` on two instances (below).
 
 ## Time zone, date and time
 
@@ -174,7 +203,10 @@ scripts/screenshot.sh           # vm/screen.png (grim in the guest)
 `run-vm.sh` options: `--ui sdl|gtk|x11` (window, default SDL), `--headless` (no window; GL via egl-headless),
 `--no-gl` (no 3D: cage renders with pixman, Qt with llvmpipe, slow video; the QEMU window then lags one frame
 behind, the guest itself is fine), `--res WxH` (the GTK window reports its own size instead), `--phone VID:PID,...`
-(more phones to pass through, ids from `lsusb`), `--wifi` (a virtual WiFi card, `mac80211_hwsim`, on every boot).
+(more phones to pass through, ids from `lsusb`), `--wifi` (a virtual WiFi card, `mac80211_hwsim`, on every boot),
+`--eth2 PORT` (a second Ethernet card on a virtual cable: instances with the same PORT are connected, e.g.
+`--instance a --ssh-port 2231 --eth2 47015` as the head unit with `openhu-cli ethernet mode server` and
+`--instance b --ssh-port 2232 --eth2 47015` as a device).
 
 The dev image lets cage draw the mouse cursor itself (`WLR_NO_HARDWARE_CURSORS=1`): the cursor plane of QEMU's
 virtio GPU shows the pointer about 64 px too low, so every click seemed to land above the cursor.

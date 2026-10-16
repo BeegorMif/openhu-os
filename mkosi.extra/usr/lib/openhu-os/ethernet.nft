@@ -1,0 +1,13 @@
+# Devices on the Ethernet port (DHCP server mode, 10.42.1.0/24, #15) reach the head unit only: no forwarding to the
+# uplink (WiFi, USB tethering, mobile data) or the hotspot, and nothing forwarded to them. NetworkManager's "shared"
+# mode adds its own forward accept and NAT rules; a drop here wins over them (every base chain of the hook must
+# accept a packet). Loaded by openhu-ethernet-firewall.service.
+table inet openhu-ethernet
+delete table inet openhu-ethernet
+table inet openhu-ethernet {
+	chain forward {
+		type filter hook forward priority filter - 10; policy accept;
+		ip saddr 10.42.1.0/24 drop
+		ip daddr 10.42.1.0/24 drop
+	}
+}

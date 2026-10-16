@@ -1,0 +1,17 @@
+# No forwarding from and to the devices on the Ethernet port (/usr/lib/openhu-os/ethernet.nft, #15), loaded before
+# NetworkManager brings the port up.
+[Unit]
+Description=OpenHU OS: no forwarding for Ethernet devices
+DefaultDependencies=no
+Before=network-pre.target NetworkManager.service
+Wants=network-pre.target
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /usr/lib/openhu-os/ethernet.nft
+ExecStop=/usr/sbin/nft delete table inet openhu-ethernet
+
+[Install]
+WantedBy=multi-user.target

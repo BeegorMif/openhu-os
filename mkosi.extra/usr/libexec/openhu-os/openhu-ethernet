@@ -1,0 +1,164 @@
+#!/usr/bin/python3
+"""Ethernet mode of OpenHU OS, for the OpenHU settings (as the openhu user: pkexec /usr/bin/openhu-cli ethernet ...).
+
+  openhu-ethernet status         {"mode", "address", "serverAllowed", "devices", "clients"} as JSON
+  openhu-ethernet mode client    the head unit asks for an address (router in the workshop, mobile router)
+  openhu-ethernet mode server    the head unit hands out addresses to devices in the car (10.42.1.1/24)
+
+One NetworkManager profile "openhu-ethernet" for every Ethernet port (/usr/lib/NetworkManager/system-connections);
+the mode is its ipv4.method (auto = client, shared = server), changed with nmcli, so NetworkManager keeps the changed
+copy on the data partition. There must never be two DHCP servers on a network: "server" is refused while a port in
+client mode got an address from one. Devices reach only the head unit, nothing is forwarded (ethernet.nft).
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+
+PROFILE = "openhu-ethernet"
+ADDRESS = "10.42.1.1"
+PREFIX = 24
+LEASES = "/var/lib/NetworkManager/dnsmasq-{}.leases"
+
+CLIENT = ["ipv4.method", "auto", "ipv4.addresses", "", "ipv4.dhcp-timeout", "2147483647",
+          "ipv4.route-metric", "700", "ipv6.method", "auto", "ipv6.route-metric", "700",
+          "connection.multi-connect", "multiple"]
+# one port only: the same address on two ports would not work
+SERVER = ["ipv4.method", "shared", "ipv4.addresses", f"{ADDRESS}/{PREFIX}", "ipv4.dhcp-timeout", "0",
+          "ipv4.route-metric", "-1", "ipv6.method", "link-local", "ipv6.route-metric", "-1",
+          "connection.multi-connect", "single"]
+
+
+def fail(message):
+    print(json.dumps({"error": message}))
+    sys.exit(1)
+
+
+def nmcli(*args, check=True):
+    result = subprocess.run(["nmcli", *args], capture_output=True, text=True)
+    if check and result.returncode != 0:
+        fail(result.stderr.strip() or f"nmcli {' '.join(args)} failed")
+    return result
+
+
+def fields(text):
+    """nmcli -t -m multiline output: "KEY:value" or "KEY[n]:value" lines (values may contain ":"), as lists"""
+    values = {}
+    for line in text.splitlines():
+        key, _, value = line.partition(":")
+        values.setdefault(key.split("[")[0], []).append(value)
+    return values
+
+
+def mode():
+    method = nmcli("-g", "ipv4.method", "connection", "show", PROFILE).stdout.strip()
+    return "server" if method == "shared" else "client"
+
+
+def state_name(general_state):
+    """"100 (connected)" -> connected, "70 (connecting (getting IP configuration))" -> connecting, ..."""
+    try:
+        code = int(general_state.split()[0])
+    except (ValueError, IndexError):
+        return "unknown"
+    if code >= 100:
+        return "connected"
+    if code >= 40:
+        return "connecting"
+    if code == 20:
+        return "no-cable"
+    return "disconnected"
+
+
+def devices():
+    """The Ethernet ports for this profile: running it, or free (not taken by another profile such as the VM's own
+    network or USB tethering)"""
+    found = []
+    for line in nmcli("-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device").stdout.splitlines():
+        parts = line.replace("\\:", "\0").split(":")
+        if len(parts) < 4:
+            continue
+        name, kind, state, connection = (p.replace("\0", ":") for p in parts[:4])
+        if kind != "ethernet" or state == "unmanaged" or connection not in ("", "--", PROFILE):
+            continue
+        show = fields(nmcli("-t", "-m", "multiline", "-f", "GENERAL,IP4,DHCP4", "device", "show", name,
+                            check=False).stdout)
+        options = dict(o.split(" = ", 1) for o in show.get("DHCP4.OPTION", []) if " = " in o)
+        address = (show.get("IP4.ADDRESS") or [""])[0]
+        found.append({
+            "interface": name,
+            "state": state_name((show.get("GENERAL.STATE") or [""])[0]),
+            "active": connection == PROFILE,
+            "address": address.split("/")[0],
+            # a DHCP server on this network gave the address
+            "lease": connection == PROFILE and "ip_address" in options,
+            "dhcpServer": options.get("dhcp_server_identifier", ""),
+        })
+    return found
+
+
+def clients(ports):
+    """Devices that got an address from the head unit (dnsmasq of NetworkManager, leases of 1 h that have not run
+    out; a device unplugged a moment ago is still listed): ip, mac, name"""
+    found = []
+    now = time.time()
+    for port in ports:
+        try:
+            with open(LEASES.format(port["interface"])) as f:
+                for line in f:
+                    parts = line.split()
+                    # expiry mac ip name client-id
+                    if len(parts) >= 4 and parts[0].isdigit() and (int(parts[0]) == 0 or int(parts[0]) > now):
+                        found.append({"ip": parts[2], "mac": parts[1], "name": "" if parts[3] == "*" else parts[3],
+                                      "interface": port["interface"]})
+        except OSError:
+            pass
+    return found
+
+
+def status():
+    current = mode()
+    ports = devices()
+    return {
+        "mode": current,
+        "address": ADDRESS if current == "server" else "",
+        # never two DHCP servers: not while a port in client mode got an address from one
+        "serverAllowed": current == "server" or not any(p["lease"] for p in ports),
+        "devices": ports,
+        "clients": clients(ports) if current == "server" else [],
+    }
+
+
+def set_mode(new):
+    ports = devices()
+    if new == "server" and mode() == "client":
+        leased = [p for p in ports if p["lease"]]
+        if leased:
+            fail(f"another DHCP server ({leased[0]['dhcpServer'] or 'unknown'}) gave {leased[0]['interface']} an "
+                 "address: the head unit stays a DHCP client")
+    nmcli("connection", "modify", PROFILE, *(SERVER if new == "server" else CLIENT))
+    # apply now on the ports with a cable; the others take it when one is plugged in (autoconnect)
+    ready = [p["interface"] for p in ports if p["state"] != "no-cable"]
+    if new == "server":
+        ready = ready[:1]
+    for name in ready:
+        # client mode keeps asking for an address: do not wait for one
+        nmcli("--wait", "5", "connection", "up", PROFILE, "ifname", name, check=False)
+
+
+def main(args):
+    if os.geteuid() != 0:
+        fail("needs root (pkexec)")
+    command = args[0] if args else "status"
+    if command == "status":
+        pass
+    elif command == "mode" and args[1:] in (["client"], ["server"]):
+        set_mode(args[1])
+    else:
+        sys.exit(__doc__)
+    print(json.dumps(status()))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

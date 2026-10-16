@@ -3,7 +3,7 @@
 # restarts of the VM until --fresh.
 #
 #   scripts/run-vm.sh [--fresh] [--no-gl] [--res WxH] [--headless] [--phone VID:PID,...] [--ui gtk|x11|sdl]
-#                     [--instance NAME --ssh-port PORT] [--no-phone] [--wifi]
+#                     [--instance NAME --ssh-port PORT] [--no-phone] [--wifi] [--eth2 PORT]
 #
 #   --fresh     new disk from the newest image (and fresh UEFI variables)
 #   --image F   with --fresh: this image instead of the newest (e.g. an older version to test updates)
@@ -19,6 +19,9 @@
 #   --no-phone  no phone passthrough (a second VM next to the one with the phone)
 #   --wifi      a virtual WiFi card (mac80211_hwsim, wlan0) on every boot, through a kernel command line extra
 #               (SMBIOS, read by the UKI's systemd-stub); without it the VM has no WiFi like a PC without a card
+#   --eth2 PORT a second Ethernet card on a virtual cable (UDP multicast on the host's loopback, PORT picks the
+#               cable): VMs started with the same PORT see each other, e.g. the head unit as DHCP server and a
+#               second instance as a device (openhu-cli ethernet mode, #15). No root or tap device needed.
 #   --instance  a second VM with its own disk, UEFI variables and QMP socket in vm/NAME/ (scripts/powerloss-test.sh);
 #               needs its own --ssh-port (scripts/ssh.sh: OPENHU_VM_SSH_PORT=PORT)
 #
@@ -32,7 +35,7 @@ OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
 # fixed: systemd derives the machine id from it in a VM
 VM_UUID=6f70656e-6875-4f53-8000-000000000001
-IMAGE=""; FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222; WIFI=0
+IMAGE=""; FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222; WIFI=0; ETH2=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,6 +50,7 @@ while [ $# -gt 0 ]; do
     --instance) VM="$VM/$2"; shift 2 ;;
     --ssh-port) SSH_PORT="$2"; shift 2 ;;
     --wifi) WIFI=1; shift ;;
+    --eth2) ETH2="$2"; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 1 ;;
   esac
 done
@@ -95,6 +99,11 @@ audio=none
 [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pipewire-0" ] && audio=pipewire
 
 extra=()
+if [ -n "$ETH2" ]; then
+  # its own MAC per instance (the same on every start): the VMs on one cable must differ
+  mac="$(printf '%s' "$VM" | md5sum | sed -E 's/^(..)(..)(..).*/52:54:01:\1:\2:\3/')"
+  extra+=(-netdev "socket,id=net1,mcast=230.0.0.1:$ETH2,localaddr=127.0.0.1" -device "virtio-net-pci,netdev=net1,mac=$mac")
+fi
 [ "$WIFI" = 1 ] && extra+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=modules_load=mac80211_hwsim mac80211_hwsim.radios=1")
 
 exec qemu-system-x86_64 -name openhu-os -nodefaults -machine q35,accel=kvm,vmport=off -cpu host -smp 4 -m 4096 -uuid "$VM_UUID" \
@@ -104,7 +113,7 @@ exec qemu-system-x86_64 -name openhu-os -nodefaults -machine q35,accel=kvm,vmpor
   -device virtio-blk-pci,drive=disk0,bootindex=1 \
   "${display[@]}" "${usb[@]}" "${extra[@]}" \
   -audiodev "$audio,id=snd0" -device intel-hda -device hda-duplex,audiodev=snd0 \
-  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22 -device virtio-net-pci,netdev=net0 \
+  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
   -device virtio-rng-pci \
   -qmp unix:"$VM/qmp.sock",server=on,wait=off \
   -pidfile "$VM/qemu.pid" -serial mon:stdio

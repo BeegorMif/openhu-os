@@ -8,4 +8,8 @@ enable openhu-boot-status.service
 # only starts when switched on (openhu-ssh), see ssh.service.d/openhu-os.conf
 enable ssh.service
 enable fstrim.timer
+# Ethernet (#15): no forwarding for the devices, openhu.local
+enable openhu-ethernet-firewall.service
+enable avahi-daemon.service
+enable avahi-daemon.socket
 disable *

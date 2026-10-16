@@ -1,0 +1,17 @@
+# dev profile: the VM's own network (QEMU user networking, ssh from the host; MAC from scripts/run-vm.sh), always a
+# DHCP client, so "openhu-ethernet" (Ethernet mode client/server, #15) is free for the second card (--eth2).
+[connection]
+id=vm-uplink
+uuid=6f70656e-6875-4574-6800-000000000002
+type=ethernet
+autoconnect=true
+autoconnect-priority=100
+
+[ethernet]
+mac-address=52:54:00:12:34:56
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
