@@ -15,6 +15,8 @@ systemctl mask systemd-boot-random-seed.service
 # The splash stays until openhu-session takes the display over (plymouth quit --retain-splash); Plymouth's own quit
 # at the end of the boot would leave a black screen in between
 systemctl mask plymouth-quit.service plymouth-quit-wait.service
+# NetworkManager ignores profiles that others can read (git only knows 0644)
+chmod 600 /usr/lib/NetworkManager/system-connections/*.nmconnection
 # /etc is read-only: NetworkManager writes resolv.conf to /run
 ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf
 # Every device creates its own ssh host keys on the data partition (/usr/libexec/openhu-os/ssh-hostkeys), not the

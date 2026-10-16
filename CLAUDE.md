@@ -4,7 +4,7 @@ OpenHU OS is the image the head unit boots: Debian trixie built with mkosi, the 
 
 ## This repo
 - `mkosi.conf`, `mkosi.profiles/{dev,release}`: packages and the image. The dev profile has ssh, ffmpeg and sox.
-- `mkosi.extra/`: units, `openhu-cli` (`/usr/bin`) and helpers in `/usr/libexec/openhu-os` (`openhu-update`, `boot-status`, `boot-check`). polkit allows exactly OpenHU's subcommands.
+- `mkosi.extra/`: units, `openhu-cli` (`/usr/bin`) and helpers in `/usr/libexec/openhu-os` (`openhu-update`, `boot-status`, `boot-check`, `openhu-ethernet`). polkit allows exactly OpenHU's subcommands.
 - `scripts/`: `build.sh --profile dev|release --version V`, `fetch-debs.sh` (newest openhu main CI build, `--ci RUN`, or `--dir` with local debs), `run-vm.sh` (the user's VM; your own instances via `--instance`), `ssh.sh`, `screenshot.sh`, `serve-updates.sh` + `add-update.sh` (local update server on port 8070), `usb-stick.sh`, `update-test.sh`, `powerloss-test.sh`, `release*.sh`.
 - Image builds in a worktree need the VM ssh key: copy `local/id_ed25519*` from the main checkout. Long build logs go to `local/terminal.log`.
 - The image CI (`.github/workflows/image.yml`) takes OpenHU from the newest openhu main CI artifact. A run right after an openhu merge can still get the old build. A tag `v<version>` publishes a release, and devices update from `releases/latest`.

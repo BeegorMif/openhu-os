@@ -1,0 +1,27 @@
+# Wired Ethernet (onboard port, USB-Ethernet adapters), #15. Starts as a DHCP client; "openhu-cli ethernet mode
+# server" makes it the DHCP server for devices in the car (10.42.1.1/24, NetworkManager's dnsmasq; the hotspot keeps
+# 10.42.0.0/24). The mode is changed with nmcli, NetworkManager then keeps the changed copy on the data partition
+# (/var/lib/NetworkManager/system-connections, same uuid), which takes the place of this file.
+# Forwarding from and to the devices is dropped (openhu-ethernet-firewall.service).
+[connection]
+id=openhu-ethernet
+uuid=6f70656e-6875-4574-6800-000000000015
+type=ethernet
+autoconnect=true
+autoconnect-priority=0
+# client: on every Ethernet port; server: on one port only (the same address twice would not work)
+multi-connect=3
+
+[ethernet]
+
+[ipv4]
+method=auto
+# keeps asking until a DHCP server answers (a router that is switched on later)
+dhcp-timeout=2147483647
+# behind WiFi (600) and USB tethering as the uplink
+route-metric=700
+
+[ipv6]
+method=auto
+addr-gen-mode=stable-privacy
+route-metric=700

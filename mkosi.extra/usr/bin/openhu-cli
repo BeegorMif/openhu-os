@@ -1,11 +1,11 @@
 #!/usr/bin/python3
-"""openhu-cli – the command line of OpenHU OS: the system (update, ssh, time), the settings of OpenHU and commands
+"""openhu-cli – the command line of OpenHU OS: the system (update, ssh, time, ethernet), the settings of OpenHU and commands
 to the running OpenHU through its API (ws://127.0.0.1:<api port>). "openhu-cli help" lists the commands,
 "openhu-cli help <command>" explains one. Every command takes --json (output for scripts); an error ends with exit
 code 1.
 
-The system commands (update, ssh, time, start, stop, restart) run as root; as another user openhu-cli runs itself
-through pkexec (polkit allows the openhu user update, ssh, time and restart, OpenHU's settings use them so). They call
+The system commands (update, ssh, time, ethernet, start, stop, restart) run as root; as another user openhu-cli runs
+itself through pkexec (polkit allows the openhu user update, ssh, time, ethernet and restart, OpenHU's settings use them so). They call
 the helpers in /usr/libexec/openhu-os, which do the work. OpenHU itself is not in PATH: openhu-session.service starts
 it (openhu-cli start/stop/restart).
 """
@@ -24,8 +24,8 @@ RUN = "/run/openhu-os"
 INI = "/var/lib/openhu/openhu.ini"
 SESSION = "openhu-session.service"
 # commands that need root; the openhu user may run PKEXEC_COMMANDS through pkexec (the polkit rule)
-ROOT_COMMANDS = ("update", "ssh", "time", "start", "stop", "restart")
-PKEXEC_COMMANDS = ("update", "ssh", "time", "restart")
+ROOT_COMMANDS = ("update", "ssh", "time", "ethernet", "start", "stop", "restart")
+PKEXEC_COMMANDS = ("update", "ssh", "time", "ethernet", "restart")
 PAGES = ["home", "aa", "settings", "store"] + ["settings/" + c for c in (
     "general", "aa", "audio", "wifi", "bluetooth", "network", "keys", "apps", "system", "info")]
 
@@ -376,6 +376,37 @@ def cmd_time(args):
     return 0
 
 
+# ethernet
+
+def ethernet_text(data):
+    if data.get("mode") == "server":
+        lines = [f"DHCP server: devices get addresses from {data.get('address')} (openhu.local)"]
+    else:
+        lines = ["DHCP client" + ("" if data.get("serverAllowed") else " (another DHCP server answers, server mode not possible)")]
+    names = {"connected": "connected", "connecting": "waiting for an address", "no-cable": "no cable",
+             "disconnected": "not connected"}
+    for port in data.get("devices", []):
+        state = names.get(port.get("state"), port.get("state"))
+        if port.get("address") and port.get("state") == "connected":
+            state += f", {port['address']}"
+        lines.append(f"  {port['interface']}: {state}")
+    for client in data.get("clients", []):
+        lines.append(f"  device {client['ip']} {client['name'] or client['mac']}")
+    return lines
+
+
+def cmd_ethernet(args):
+    ensure_root()
+    if args.action == "status":
+        data = helper("openhu-ethernet", ["status"])
+    else:
+        if args.mode not in ("client", "server"):
+            fail("ethernet mode client|server")
+        data = helper("openhu-ethernet", ["mode", args.mode])
+    output(data, ethernet_text(data))
+    return 0
+
+
 # settings
 
 APPLIES = {"now": "", "reconnect": " – applies with the next Android Auto connection",
@@ -670,6 +701,8 @@ def complete_values(done):
             return sorted(available_timezones())
         if command == "time" and rest == ["ntp"]:
             return ["on", "off"]
+        if command == "ethernet" and rest == ["mode"]:
+            return ["client", "server"]
         if command == "volume" and not rest:
             return ["mute", "unmute", "+5", "-5"]
         if command == "daynight" and not rest:
@@ -717,6 +750,10 @@ def build_parser():
     sub = command("time", "time zone, date and time", cmd_time)
     sub.add_argument("action", choices=["status", "zone", "zones", "ntp", "set"], nargs="?", default="status")
     sub.add_argument("value", nargs="*", help="zone: Europe/Berlin; ntp: on|off; set: \"2026-10-13 14:30\"")
+
+    sub = command("ethernet", "Ethernet port: DHCP client (router) or DHCP server for devices in the car", cmd_ethernet)
+    sub.add_argument("action", choices=["status", "mode"], nargs="?", default="status")
+    sub.add_argument("mode", nargs="?", help="mode: client | server")
 
     sub = command("config", "settings of OpenHU (keys like in the settings page)", cmd_config)
     sub.add_argument("action", choices=["list", "keys", "get", "set"], nargs="?", default="list")
