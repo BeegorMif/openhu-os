@@ -91,8 +91,8 @@ openhu-cli ssh on                              # now and at every boot; off swit
 Everything is on the data partition (`/etc` is read-only): the switch `/var/lib/openhu-os/ssh/enabled`, the
 password hash (yescrypt) for `pam_pwdfile`, keys in `/var/lib/openhu-os/ssh/authorized_keys`, and the host keys,
 which every device creates on the first start of sshd. sshd listens on every network, the phone's hotspot too.
-The password is only for the network: the dev image's consoles open a root shell without a login (whoever
-has a keyboard at the head unit has physical access anyway).
+The password is only for the network: the consoles open a root shell without a login (whoever has a keyboard at
+the head unit has physical access anyway).
 After the login a greeting shows the version, the result of the last update and the most useful commands
 (`/etc/update-motd.d/10-openhu-os`).
 
@@ -159,7 +159,7 @@ Profiles:
 | | dev | release |
 |---|---|---|
 | ssh | always on: root with the key in `local/id_ed25519` (`scripts/ssh.sh`), password `openhu` | off until switched on in OpenHU (below) |
-| Console | root shell without a login on the text consoles (Ctrl+Alt+F2 switches away from cage) and the serial console (`ttyS0`) | none: cage does not switch VTs |
+| Console | root shell without a login on the text consoles (Ctrl+Alt+F2 switches away from cage, Ctrl+Alt+F1 back) and the serial console (`ttyS0`) | the same on the text consoles; a serial console only where the hardware's console is serial (no `console=`) |
 | Tools | `grim` (screenshots), strace, libinput-tools, … | none (`openhu-cli` in both) |
 
 ## Run in a VM
