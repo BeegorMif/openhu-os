@@ -32,7 +32,8 @@ EnvironmentFile=-/var/lib/openhu/session.env
 ExecStartPre=+-/usr/bin/plymouth quit --retain-splash
 # "iw reg set" for the hotspot country runs in a child process of OpenHU
 AmbientCapabilities=CAP_NET_ADMIN
-ExecStart=/usr/bin/cage -d -- /usr/libexec/openhu/openhu
+# -s: VT switching, Ctrl+Alt+F2 ... opens a text console with a root shell (getty@.service.d/autologin.conf, #20)
+ExecStart=/usr/bin/cage -d -s -- /usr/libexec/openhu/openhu
 Restart=always
 RestartSec=2
 # A crashed OpenHU ends cage and so the session (OpenHU keeps cage's pipe from its children, openhu#68), and
