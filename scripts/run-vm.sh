@@ -3,7 +3,7 @@
 # restarts of the VM until --fresh.
 #
 #   scripts/run-vm.sh [--fresh] [--no-gl] [--res WxH] [--headless] [--phone VID:PID,...] [--ui gtk|x11|sdl]
-#                     [--instance NAME --ssh-port PORT] [--no-phone] [--wifi] [--eth2 PORT]
+#                     [--instance NAME --ssh-port PORT] [--no-phone] [--wifi] [--eth2 PORT] [--plugins PLUGINS]
 #
 #   --fresh     new disk from the newest image (and fresh UEFI variables)
 #   --image F   with --fresh: this image instead of the newest (e.g. an older version to test updates)
@@ -22,7 +22,8 @@
 #   --eth2 PORT a second Ethernet card on a virtual cable (UDP multicast on the host's loopback, PORT picks the
 #               cable): VMs started with the same PORT see each other, e.g. the head unit as DHCP server and a
 #               second instance as a device (openhu-cli ethernet mode, #15). No root or tap device needed.
-#   --instance  a second VM with its own disk, UEFI variables and QMP socket in vm/NAME/ (scripts/powerloss-test.sh);
+#   --plugins D   share the host folder D into the guest (9p, mount tag "plugins"); default ../openhu-plugins if it exists
+#   --no-plugins  no plugins share (a second VM next to the first, CI)#   --instance  a second VM with its own disk, UEFI variables and QMP socket in vm/NAME/ (scripts/powerloss-test.sh);
 #               needs its own --ssh-port (scripts/ssh.sh: OPENHU_VM_SSH_PORT=PORT)
 #
 # ssh: scripts/ssh.sh (port 2222), screenshot: scripts/screenshot.sh. Serial console on this terminal (Ctrl+A X
@@ -35,7 +36,7 @@ OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
 # fixed: systemd derives the machine id from it in a VM
 VM_UUID=6f70656e-6875-4f53-8000-000000000001
-IMAGE=""; FRESH=0; GL=1; RES=1280x720; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222; WIFI=0; ETH2=""
+IMAGE=""; FRESH=0; GL=1; RES=1920x1080; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222; WIFI=1; ETH2=""; PLUGINS="$REPO/../openhu-plugins/plugins"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -51,6 +52,8 @@ while [ $# -gt 0 ]; do
     --ssh-port) SSH_PORT="$2"; shift 2 ;;
     --wifi) WIFI=1; shift ;;
     --eth2) ETH2="$2"; shift 2 ;;
+    --plugins) PLUGINS="$2"; shift 2 ;;
+    --no-plugins) PLUGINS=""; shift ;;
     *) echo "unknown option $1" >&2; exit 1 ;;
   esac
 done
@@ -104,7 +107,30 @@ if [ -n "$ETH2" ]; then
   mac="$(printf '%s' "$VM" | md5sum | sed -E 's/^(..)(..)(..).*/52:54:01:\1:\2:\3/')"
   extra+=(-netdev "socket,id=net1,mcast=230.0.0.1:$ETH2,localaddr=127.0.0.1" -device "virtio-net-pci,netdev=net1,mac=$mac")
 fi
-[ "$WIFI" = 1 ] && extra+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=modules_load=mac80211_hwsim mac80211_hwsim.radios=1")
+# Extra kernel command line for the guest (one SMBIOS string, read by the UKI's systemd-stub)
+cmdline=()
+[ "$WIFI" = 1 ] && cmdline+=(modules_load=mac80211_hwsim mac80211_hwsim.radios=1)
+
+# Plugins checkout shared into the guest (9p, mount tag "plugins"); skipped if the folder does not exist
+if [ -n "$PLUGINS" ] && [ -d "$PLUGINS" ]; then
+  echo "Sharing $(realpath "$PLUGINS") into the VM (mount tag: plugins)"
+  extra+=(-virtfs "local,id=plugins,path=$(realpath "$PLUGINS"),mount_tag=plugins,security_model=none")
+  cmdline+=("systemd.mount-extra=plugins:/var/lib/openhu/.openhu/plugins:9p:trans=virtio,version=9p2000.L,msize=1048576,nofail")
+elif [ -n "$PLUGINS" ] && [ "$PLUGINS" != "$REPO/../openhu-plugins" ]; then
+  echo "--plugins: $PLUGINS is not a directory" >&2; exit 1
+fi
+
+# shared helpers (openhu.py) sit next to plugins/ in the repo; mounted as a sibling in the guest
+if [ -d "$PLUGINS/../common" ]; then
+  echo "Sharing $(realpath "$PLUGINS/../common") into the VM (mount tag: common)"
+  extra+=(-virtfs "local,id=common,path=$(realpath "$PLUGINS/../common"),mount_tag=common,security_model=none,readonly=on")
+  cmdline+=("systemd.mount-extra=common:/var/lib/openhu/.openhu/common:9p:trans=virtio,version=9p2000.L,msize=1048576,nofail")
+fi
+
+if [ ${#cmdline[@]} -gt 0 ]; then
+  cmdline_str="${cmdline[*]}"
+  extra+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=${cmdline_str//,/,,}")
+fi
 
 exec qemu-system-x86_64 -name openhu-os -nodefaults -machine q35,accel=kvm,vmport=off -cpu host -smp 4 -m 4096 -uuid "$VM_UUID" \
   -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
