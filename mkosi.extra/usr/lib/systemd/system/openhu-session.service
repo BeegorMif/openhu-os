@@ -9,12 +9,20 @@ Conflicts=getty@tty1.service
 StartLimitIntervalSec=0
 
 [Service]
-# OpenHU (cage's child, hence NotifyAccess=all) reports READY=1 once its shell is up, then a watchdog ping from its GUI
-# thread every half of WatchdogSec (openhu#129). A hung OpenHU (GUI thread blocked) misses the pings: systemd sends
-# SIGABRT to the session after WatchdogSec and Restart= brings it back.
+# OpenHU reports READY=1 once its shell is up, then a watchdog ping from its GUI thread every half of WatchdogSec
+# (openhu#129). A hung OpenHU (GUI thread blocked) misses the pings: systemd sends SIGABRT to the session after
+# WatchdogSec and Restart= brings it back.
+# PAMName= moves cage and OpenHU into the logind session scope, where systemd does not take their notifications for
+# this unit. OpenHU sends them to the notify relay instead, which ExecStartPre=+ (no PAM session) leaves running in
+# this unit's cgroup and which forwards them (NotifyAccess=all: the relay is not the main process). systemd logs it
+# as a "left-over process" at every start.
+# For the same reason the watchdog's SIGABRT reaches only cage and the relay, not a hung OpenHU in the scope:
+# session-cleanup (ExecStopPost) kills what is left of the session after a watchdog or start timeout.
 Type=notify
 NotifyAccess=all
 WatchdogSec=10s
+RuntimeDirectory=openhu-session
+Environment=NOTIFY_SOCKET=/run/openhu-session/notify
 # The watchdog only runs from READY=1 on, the start up to it (cage, OpenHU's shell) has this time; on the Pi it takes a
 # few seconds. Also boot-check waits for the start (After=). A start that hangs is restarted after it.
 TimeoutStartSec=60s
@@ -38,10 +46,13 @@ Environment=XKB_DEFAULT_LAYOUT=de
 EnvironmentFile=-/var/lib/openhu/session.env
 # The boot splash keeps its last frame until cage shows OpenHU ("+": as root, "-": no splash is fine)
 ExecStartPre=+-/usr/bin/plymouth quit --retain-splash
+# as the openhu user (the socket is only for OpenHU); returns once the socket exists, the relay stays in the background
+ExecStartPre=+/usr/bin/setpriv --reuid=openhu --regid=openhu --clear-groups /usr/libexec/openhu-os/notify-relay /run/openhu-session/notify
 # "iw reg set" for the hotspot country runs in a child process of OpenHU
 AmbientCapabilities=CAP_NET_ADMIN
 # -s: VT switching, Ctrl+Alt+F2 ... opens a text console with a root shell (getty@.service.d/autologin.conf, #20)
 ExecStart=/usr/bin/cage -d -s -- /usr/libexec/openhu/openhu
+ExecStopPost=+/usr/libexec/openhu-os/session-cleanup
 Restart=always
 RestartSec=2
 # A crashed OpenHU ends cage and so the session (OpenHU keeps cage's pipe from its children, openhu#68), and
