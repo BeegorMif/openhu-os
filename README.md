@@ -76,7 +76,9 @@ done by helpers in `/usr/libexec/openhu-os` (`openhu-update`, `openhu-ssh`, `ope
 called directly.
 
 OpenHU itself (`/usr/libexec/openhu/openhu`) is not in PATH: `openhu-session.service` runs it in cage, `openhu-cli
-start | stop | restart` controls it. A second OpenHU started by hand ends right away ("already running", lock
+start | stop | restart` controls it. systemd restarts the session when OpenHU crashes or hangs: OpenHU reports when its
+shell is up, then pings a 10 s watchdog from its GUI thread
+([openhu#129](https://github.com/average-web-dev/openhu/issues/129)). A second OpenHU started by hand ends right away ("already running", lock
 `/run/lock/openhu.lock`). Older images (before
 [openhu#20](https://github.com/average-web-dev/openhu/issues/20)) call the command line `openhu`.
 

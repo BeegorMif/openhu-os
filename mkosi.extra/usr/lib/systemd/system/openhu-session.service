@@ -9,7 +9,15 @@ Conflicts=getty@tty1.service
 StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+# OpenHU (cage's child, hence NotifyAccess=all) reports READY=1 once its shell is up, then a watchdog ping from its GUI
+# thread every half of WatchdogSec (openhu#129). A hung OpenHU (GUI thread blocked) misses the pings: systemd sends
+# SIGABRT to the session after WatchdogSec and Restart= brings it back.
+Type=notify
+NotifyAccess=all
+WatchdogSec=10s
+# The watchdog only runs from READY=1 on, the start up to it (cage, OpenHU's shell) has this time; on the Pi it takes a
+# few seconds. Also boot-check waits for the start (After=). A start that hangs is restarted after it.
+TimeoutStartSec=60s
 User=openhu
 PAMName=openhu-session
 TTYPath=/dev/tty1
