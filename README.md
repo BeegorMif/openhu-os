@@ -317,4 +317,4 @@ host/                       udev rule for the development host
 
 - [openhu](https://github.com/BeegorMif/openhu) – the head unit application
 - [openhu-plugins](https://github.com/BeegorMif/openhu-plugins) – official plugins
-- [aasdk](https://github.com/average-web-dev/aasdk/tree/openhu) – Android Auto SDK (OpenHU fork)
+- [aasdk](https://github.com/BeegorMif/aasdk/tree/openhu) – Android Auto SDK (OpenHU fork)

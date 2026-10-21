@@ -69,9 +69,9 @@ aasdk = current.get("libaasdk")
 if aasdk:
     old = previous.get("libaasdk")
     if old and upstream(old) != upstream(aasdk):
-        lines.append(f"- **libaasdk** {upstream(old)} → [{upstream(aasdk)}](https://github.com/average-web-dev/aasdk/releases/tag/openhu-v{upstream(aasdk)})")
+        lines.append(f"- **libaasdk** {upstream(old)} → [{upstream(aasdk)}](https://github.com/BeegorMif/aasdk/releases/tag/openhu-v{upstream(aasdk)})")
     else:
-        lines.append(f"- **libaasdk** [{upstream(aasdk)}](https://github.com/average-web-dev/aasdk/releases/tag/openhu-v{upstream(aasdk)})")
+        lines.append(f"- **libaasdk** [{upstream(aasdk)}](https://github.com/BeegorMif/aasdk/releases/tag/openhu-v{upstream(aasdk)})")
 kernel = current.get("linux-image-amd64")
 if kernel:
     old = previous.get("linux-image-amd64")
@@ -116,13 +116,13 @@ AASDK_OLD=""
   fi
   if [ -n "$AASDK_OLD" ] && [ "$AASDK_OLD" != "$AASDK_NEW" ]; then
     echo; echo "### libaasdk"; echo
-    gh release list -R average-web-dev/aasdk --limit 50 --json tagName,name -q '.[] | "\(.tagName) \(.name)"' |
+    gh release list -R BeegorMif/aasdk --limit 50 --json tagName,name -q '.[] | "\(.tagName) \(.name)"' |
       while read -r tag name; do
         v="${tag#openhu-v}"
         # releases newer than the previous one, up to the current one
         if [ "$(printf '%s\n%s\n' "$AASDK_OLD" "$v" | sort -V | head -1)" = "$AASDK_OLD" ] && [ "$v" != "$AASDK_OLD" ] &&
            [ "$(printf '%s\n%s\n' "$v" "$AASDK_NEW" | sort -V | tail -1)" = "$AASDK_NEW" ]; then
-          echo "- [$v](https://github.com/average-web-dev/aasdk/releases/tag/$tag)"
+          echo "- [$v](https://github.com/BeegorMif/aasdk/releases/tag/$tag)"
         fi
       done
   fi

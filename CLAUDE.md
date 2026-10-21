@@ -12,7 +12,7 @@ OpenHU OS is the image the head unit boots: Debian trixie built with mkosi, the 
 
 ## The OpenHU project
 
-OpenHU, OpenHU OS and plugins live under github.com/BeegorMif and are usually checked out next to each other. The currently compatible AASDK fork is still under github.com/average-web-dev:
+OpenHU, OpenHU OS, plugins and AASDK live under github.com/BeegorMif and are usually checked out next to each other. The compatible AASDK branch is `openhu`:
 
 | Repo | What | Default branch |
 |---|---|---|
