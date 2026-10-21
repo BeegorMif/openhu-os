@@ -30,9 +30,9 @@ grep -q pam_pwdfile /etc/pam.d/sshd
 debian="$(. /usr/lib/os-release && echo "Debian $VERSION_ID $VERSION_CODENAME")"
 sed -i -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"OpenHU OS $IMAGE_VERSION ($debian)\"|" \
        -e 's|^NAME=.*|NAME="OpenHU OS"|' \
-       -e 's|^HOME_URL=.*|HOME_URL="https://github.com/average-web-dev/openhu-os"|' \
-       -e 's|^SUPPORT_URL=.*|SUPPORT_URL="https://github.com/average-web-dev/openhu-os"|' \
-       -e 's|^BUG_REPORT_URL=.*|BUG_REPORT_URL="https://github.com/average-web-dev/openhu-os/issues"|' \
+       -e 's|^HOME_URL=.*|HOME_URL="https://github.com/BeegorMif/openhu-os"|' \
+       -e 's|^SUPPORT_URL=.*|SUPPORT_URL="https://github.com/BeegorMif/openhu-os"|' \
+       -e 's|^BUG_REPORT_URL=.*|BUG_REPORT_URL="https://github.com/BeegorMif/openhu-os/issues"|' \
        /usr/lib/os-release
 printf 'OpenHU OS %s \\n \\l\n\n' "$IMAGE_VERSION" > /etc/issue
 printf 'OpenHU OS %s\n' "$IMAGE_VERSION" > /etc/issue.net

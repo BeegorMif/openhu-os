@@ -4,7 +4,7 @@
 #
 #   scripts/fetch-debs.sh                 newest successful CI build of openhu main (openhu + the libaasdk it was
 #                                         built against, both from the CI artifact)
-#   scripts/fetch-debs.sh --ci RUN_ID     a specific CI run of average-web-dev/openhu
+#   scripts/fetch-debs.sh --ci RUN_ID     a specific CI run of BeegorMif/openhu
 #   scripts/fetch-debs.sh --dir PATH      local .debs (e.g. ../openhu/docker/output); libaasdk must match the
 #                                         aasdk openhu was built against
 set -euo pipefail
@@ -26,12 +26,12 @@ trap 'rm -rf "$tmp"' EXIT
 
 if [ "$SOURCE" = ci ]; then
   if [ -z "$RUN_ID" ]; then
-    RUN_ID="$(gh run list -R average-web-dev/openhu -w ci.yml -b main -s success -L 1 --json databaseId -q '.[0].databaseId')"
+    RUN_ID="$(gh run list -R BeegorMif/openhu -w ci.yml -b main -s success -L 1 --json databaseId -q '.[0].databaseId')"
   fi
   echo "openhu CI run $RUN_ID, artifact openhu-$ARCH"
-  gh run download "$RUN_ID" -R average-web-dev/openhu -n "openhu-$ARCH" -D "$tmp"
+  gh run download "$RUN_ID" -R BeegorMif/openhu -n "openhu-$ARCH" -D "$tmp"
   # which OpenHU commit the packages come from, for the release notes (scripts/release-notes.sh)
-  gh run view "$RUN_ID" -R average-web-dev/openhu --json headSha,databaseId \
+  gh run view "$RUN_ID" -R BeegorMif/openhu --json headSha,databaseId \
       -q '"OPENHU_COMMIT=\(.headSha)\nOPENHU_CI_RUN=\(.databaseId)"' > "$tmp/source"
 else
   cp -v "$DIR"/*.deb "$tmp"/

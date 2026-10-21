@@ -11,7 +11,7 @@ set -euo pipefail
 
 VERSION="${1:?usage: $0 VERSION [PREVIOUS_TAG]}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-OS_REPO=average-web-dev/openhu-os
+OS_REPO=BeegorMif/openhu-os
 MANIFEST="$REPO/mkosi.output/openhu-os_$VERSION.manifest"
 [ -f "$MANIFEST" ] || { echo "$MANIFEST missing: build the release first" >&2; exit 1; }
 
@@ -63,7 +63,7 @@ if openhu:
     if old and upstream(old) != upstream(openhu):
         text = f"**OpenHU** {upstream(old)} → {upstream(openhu)}"
     if openhu_commit:
-        text += f" (commit [`{openhu_commit[:7]}`](https://github.com/average-web-dev/openhu/commit/{openhu_commit}))"
+        text += f" (commit [`{openhu_commit[:7]}`](https://github.com/BeegorMif/openhu/commit/{openhu_commit}))"
     lines.append(f"- {text}")
 aasdk = current.get("libaasdk")
 if aasdk:
@@ -108,7 +108,7 @@ AASDK_OLD=""
   sed -n '1,/^$/p' "$tmp/packages.md" | sed '/^$/d'
 
   os_prs="$(merged_prs "$OS_REPO")"
-  openhu_prs="$(merged_prs average-web-dev/openhu)"
+  openhu_prs="$(merged_prs BeegorMif/openhu)"
   if [ -n "$os_prs" ]; then echo; echo "### OpenHU OS"; echo; echo "$os_prs"; fi
   if [ -n "$openhu_prs" ]; then
     echo; echo "### OpenHU"; echo

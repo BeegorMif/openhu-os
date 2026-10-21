@@ -1,6 +1,6 @@
 # OpenHU OS
 
-Minimal Linux images for [OpenHU](https://github.com/average-web-dev/openhu), the open head unit for
+Minimal Linux images for [OpenHU](https://github.com/BeegorMif/openhu), the open head unit for
 Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 
 > [!NOTE]
@@ -145,7 +145,7 @@ clock. A Raspberry Pi 4 has none: after a power cut without internet it starts a
 
 ## Releases
 
-[GitHub releases](https://github.com/average-web-dev/openhu-os/releases): `openhu-os_<version>.raw.xz` to flash
+[GitHub releases](https://github.com/BeegorMif/openhu-os/releases): `openhu-os_<version>.raw.xz` to flash
 (`xz -d`, then `dd` or balenaEtcher; grows to the whole disk on the first boot), the update for `openhu update`
 (`openhu-os_<version>.root.raw.gz`, `openhu-os_<version>.efi`), the package manifest and `SHA256SUMS`.
 
@@ -315,6 +315,6 @@ host/                       udev rule for the development host
 
 ## Related
 
-- [openhu](https://github.com/average-web-dev/openhu) – the head unit application
-- [openhu-plugins](https://github.com/average-web-dev/openhu-plugins) – official plugins
+- [openhu](https://github.com/BeegorMif/openhu) – the head unit application
+- [openhu-plugins](https://github.com/BeegorMif/openhu-plugins) – official plugins
 - [aasdk](https://github.com/average-web-dev/aasdk/tree/openhu) – Android Auto SDK (OpenHU fork)
