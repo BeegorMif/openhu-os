@@ -4,7 +4,9 @@ Minimal Linux images for [OpenHU](https://github.com/BeegorMif/openhu), the open
 Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 
 > [!NOTE]
-> Work in progress: x86_64 (UEFI) images, developed in a VM. Raspberry Pi later.
+> x86_64 (UEFI) is the established image. ARM64 (UEFI) builds are being brought up for Raspberry Pi 4B and need
+> hardware validation; the image requires Raspberry Pi 4 UEFI firmware on a separate boot SD card. See
+> [docs/rpi4b-arm64.md](docs/rpi4b-arm64.md).
 
 ## What is in the image
 
@@ -42,8 +44,8 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 - **USB sticks:** mounted read-only under `/run/media/<name>` while plugged in (FAT32, exFAT, NTFS, ext4); a power cut
   or pulling the stick never harms it. Updates from a stick, see below.
 
-Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): signed checksums
-([#21](https://github.com/average-web-dev/openhu-os/issues/21)), Raspberry Pi 4/5.
+Planned: signed checksums ([#21](https://github.com/average-web-dev/openhu-os/issues/21)) and native Raspberry Pi
+firmware boot. The first Pi milestone uses UEFI.
 
 ## The openhu-cli command
 
@@ -164,22 +166,28 @@ wins). FAT32, exFAT, NTFS or ext4. Plug it in: OpenHU shows "OpenHU OS <version>
 Settings → System has the Install button. Leave the stick plugged in until the update is installed; pulled out
 earlier, the update stops and the running version stays.
 
-The workflow `.github/workflows/image.yml` runs on every push and pull request: newest OpenHU from its CI, dev image,
-three power cuts in a VM (KVM on the runner, no GPU: `--no-gl`), release image, which must show the OpenHU shell
-in a VM (`scripts/release-smoke-test.sh`, a screenshot check: ssh is off in a fresh release image). A tag `v<version>` (digits and dots,
-e.g. `v2026.10.13`) publishes the release; release images update from `releases/latest/download/`.
+The workflow `.github/workflows/image.yml` runs on every push and pull request: x86-64 builds and tests dev/release
+images in QEMU (KVM on the runner, no GPU: `--no-gl`), and a native ARM64 runner builds a release artifact from the
+matching OpenHU CI packages. The ARM64 artifact is for Pi 4B bring-up and is not included in the x86-64 GitHub
+release. A tag `v<version>` (digits and dots, e.g. `v2026.10.13`) publishes the x86-64 release; x86-64 devices
+update from `releases/latest/download/`.
 
 ## Build
 
-Needs Docker, the GitHub CLI (`gh`, for the packages) and, for the VM, QEMU with KVM and OVMF.
+Needs Docker, the GitHub CLI (`gh`, for the packages) and, for the VM, QEMU with KVM and OVMF. ARM64 images can be
+built on an ARM64 machine using matching ARM64 packages.
 
 ```bash
 scripts/fetch-debs.sh           # openhu + libaasdk from the newest openhu CI build into packages/
 scripts/build.sh                # dev image (default) into mkosi.output/
 scripts/build.sh --profile release
+scripts/fetch-debs.sh --arch arm64
+scripts/build.sh --profile release --architecture arm64 --version 1.0
 ```
 
-mkosi runs in a Debian trixie container (`docker/builder.Dockerfile`, `--privileged`). The package cache and the
+For local ARM64 builds, pass `--arch arm64` to `fetch-debs.sh` (or `--dir PATH` to use your ARM64 OpenHU and libaasdk
+packages), then pass `--architecture arm64` to `build.sh`. mkosi runs in a Debian trixie container
+(`docker/builder.Dockerfile`, `--privileged`). The package cache and the
 cached base image are in the Docker volume `openhu-os-cache`: after the first build, a new openhu package takes about
 3 minutes.
 

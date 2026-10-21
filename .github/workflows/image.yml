@@ -14,6 +14,43 @@ permissions:
   contents: write  # the release of a tag
 
 jobs:
+  arm64-image:
+    # Native ARM64 runner: builds a release image using the matching BeegorMif/openhu CI artifact.
+    # Pi-specific boot and peripheral validation is documented in docs/rpi4b-arm64.md.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version="$(date -u +%Y.%m.%d.%H%M)"; fi
+          case "$version" in
+            ""|*[!0-9.]*) echo "version '$version': digits and dots only (tag v2026.10.13)" >&2; exit 1 ;;
+          esac
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "OpenHU OS ARM64 $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: OpenHU ARM64 packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/fetch-debs.sh --arch arm64
+          ls packages | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build ARM64 release image
+        run: scripts/build.sh --profile release --architecture arm64 --version "$VERSION"
+
+      - name: Package ARM64 release files
+        run: scripts/release.sh "$VERSION" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openhu-os-arm64-${{ github.run_id }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
   image:
     runs-on: ubuntu-24.04
     timeout-minutes: 120

@@ -2,11 +2,8 @@
 # Puts the openhu and libaasdk packages for the image into packages/, until the OpenHU APT repository exists
 # (openhu#7).
 #
-#   scripts/fetch-debs.sh                 newest successful CI build of openhu main (openhu + the libaasdk it was
-#                                         built against, both from the CI artifact)
-#   scripts/fetch-debs.sh --ci RUN_ID     a specific CI run of BeegorMif/openhu
-#   scripts/fetch-debs.sh --dir PATH      local .debs (e.g. ../openhu/docker/output); libaasdk must match the
-#                                         aasdk openhu was built against
+#   scripts/fetch-debs.sh [--arch amd64|arm64] [--ci RUN_ID | --dir PATH]
+#                                         newest successful CI artifact or local .debs for that architecture
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,12 +11,15 @@ ARCH="${ARCH:-amd64}"
 SOURCE="ci"
 RUN_ID=""
 DIR=""
-case "${1:-}" in
-  --ci) RUN_ID="${2:-}" ;;
-  --dir) SOURCE="dir"; DIR="$2" ;;
-  "") ;;
-  *) echo "usage: $0 [--ci RUN_ID | --dir PATH]" >&2; exit 1 ;;
-esac
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --arch) ARCH="$2"; shift 2 ;;
+    --ci) RUN_ID="${2:-}"; shift 2 ;;
+    --dir) SOURCE="dir"; DIR="$2"; shift 2 ;;
+  *) echo "usage: $0 [--arch amd64|arm64] [--ci RUN_ID | --dir PATH]" >&2; exit 1 ;;
+  esac
+done
+[ "$ARCH" = amd64 ] || [ "$ARCH" = arm64 ] || { echo "unsupported package architecture: $ARCH" >&2; exit 2; }
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

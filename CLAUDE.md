@@ -26,7 +26,7 @@ OpenHU, OpenHU OS, plugins and AASDK live under github.com/BeegorMif and are usu
 - Several sessions may work in the same checkouts at once: do branch work in a **git worktree** (`<repo>.worktrees/<name>`), never switch branches in the shared checkout, and give parallel Docker builds their **own volume names** instead of the `dev.sh` volumes.
 - Bigger changes: write the concept (in the issue) and wait for the user's approval first.
 - Code, comments, commits, PRs and issues in **English**. UI strings in English with a **German translation** (English is the default language).
-- Commits are signed (SSH key from the user's agent). If signing fails, stop and ask; never bypass it.
+- Commit signing is optional; do not block repository work when an SSH signing agent is unavailable.
 - Merge only with the user's explicit OK. Tags and releases are public: only when the user asks (see Releases).
 
 ### Testing

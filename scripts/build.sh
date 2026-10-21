@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the OpenHU OS image with mkosi in a Debian trixie container. The image lands in mkosi.output/.
 #
-#   scripts/build.sh [--profile dev|release] [--version VERSION] [extra mkosi arguments]
+#   scripts/build.sh [--profile dev|release] [--architecture x86-64|arm64] [--version VERSION] [extra mkosi arguments]
 #
 # Needs the openhu and libaasdk packages in packages/ (scripts/fetch-debs.sh). The package cache and the
 # incremental base image live in the Docker volume openhu-os-cache.
@@ -10,6 +10,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="openhu-os-builder:trixie"
 PROFILE="dev"
+ARCHITECTURE="x86-64"
 # dots only: "_", "-" and "+" have a meaning in the update and boot counting file names
 VERSION="${OPENHU_OS_VERSION:-$(date -u +%Y.%m.%d.%H%M)}"
 EXTRA=()
@@ -17,14 +18,21 @@ EXTRA=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --profile) PROFILE="$2"; shift 2 ;;
+    --architecture|--arch) ARCHITECTURE="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
     *) EXTRA+=("$1"); shift ;;
   esac
 done
 
+case "$ARCHITECTURE" in
+  x86-64) DEB_ARCH=amd64 ;;
+  arm64) DEB_ARCH=arm64 ;;
+  *) echo "unsupported architecture '$ARCHITECTURE' (use x86-64 or arm64)" >&2; exit 2 ;;
+esac
+
 cd "$REPO"
-if ! ls packages/openhu_*.deb packages/libaasdk_*.deb >/dev/null 2>&1; then
-  echo "packages/ needs openhu_*.deb and libaasdk_*.deb: run scripts/fetch-debs.sh first" >&2
+if ! ls packages/openhu_*_"$DEB_ARCH".deb packages/libaasdk_*_"$DEB_ARCH".deb >/dev/null 2>&1; then
+  echo "packages/ needs openhu and libaasdk .deb files for $DEB_ARCH: run scripts/fetch-debs.sh --arch $DEB_ARCH" >&2
   exit 1
 fi
 
@@ -64,15 +72,17 @@ chmod 600 local/dev-extra/root/.ssh/authorized_keys
 
 tty=()
 [ -t 0 ] && [ -t 1 ] && tty=(-it)
-echo "Building OpenHU OS $VERSION (profile $PROFILE)"
+echo "Building OpenHU OS $VERSION (profile $PROFILE, architecture $ARCHITECTURE)"
 # mkosi needs mount namespaces and its own /proc in the container
 docker run --rm "${tty[@]}" --privileged \
   -v "$REPO:/src" -w /src \
   -v openhu-os-cache:/cache \
   "$IMAGE" bash -euo pipefail -c '
-    mkosi --profile="$1" --image-version="$2" \
+    architecture_repositories=()
+    [ "$3" = arm64 ] && architecture_repositories=(--repositories=non-free-firmware)
+    mkosi --architecture="$3" "${architecture_repositories[@]}" --profile="$1" --image-version="$2" \
           --cache-directory=/cache/incremental --package-cache-directory=/cache/packages \
-          --workspace-directory=/cache/workspace "${@:4}" -f build
-    chown -R "$3" mkosi.output' _ "$PROFILE" "$VERSION" "$(id -u):$(id -g)" "${EXTRA[@]}"
+          --workspace-directory=/cache/workspace "${@:5}" -f build
+    chown -R "$4" mkosi.output' _ "$PROFILE" "$VERSION" "$ARCHITECTURE" "$(id -u):$(id -g)" "${EXTRA[@]}"
 
 ls -lh mkosi.output/openhu-os_"$VERSION"*.raw
