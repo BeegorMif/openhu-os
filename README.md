@@ -226,6 +226,11 @@ Kernels and firmware come from the Raspberry Pi archive (the Pi kernel has the P
 from Debian: an APT pin (`rpi/sandbox/etc/apt/preferences.d/raspberrypi`) allows only the listed packages from it.
 The build also writes `openhu-os-rpi_<version>.root.raw` and `.boot.raw`, the partitions of a future update.
 
+The Pi 4 needs a bootloader (EEPROM) from 2022-11-25 or newer for `tryboot_a_b` in `autoboot.txt`: older ones stop
+at partition 1. The bootloader's screen (HDMI, no boot) shows its date. To update it, write "Misc utility images →
+Bootloader (Pi 4 family) → SD Card Boot" with the Raspberry Pi Imager to a card and boot the Pi from it once (green
+screen when done). The Pi 5 has a new enough bootloader from the factory.
+
 Flash it to an SD card (16 GB or more) or a USB SSD with the Raspberry Pi Imager ("Use custom") or
 `dd if=mkosi.output/openhu-os-rpi_<version>.raw of=/dev/<card> bs=4M conv=fsync`. The dev image has ssh with the key
 in `local/id_ed25519` (`ssh -i local/id_ed25519 root@openhu.local`) and a serial console on GPIO 14/15.

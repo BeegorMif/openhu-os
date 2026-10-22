@@ -51,6 +51,7 @@ echo "$cmdline" > "$boot/cmdline.txt"
 cp "$here/autoboot.txt" "$stage/autoboot/autoboot.txt"
 
 rm -f "$output" "${output%.raw}".*.raw
-# --architecture: the builder runs on x86, the root partition's type must be the arm64 one
-systemd-repart --empty=create --size=auto --dry-run=no --offline=yes --split=yes --architecture=arm64 \
+# --architecture: the builder runs on x86, the root partition's type must be the arm64 one. --sector-size=512: the Pi
+# bootloader reads FAT with 512-byte sectors only (repart formats an image file with 4096 by default)
+systemd-repart --empty=create --size=auto --dry-run=no --offline=yes --split=yes --architecture=arm64 --sector-size=512 \
                --root="$tree" --copy-source="$tree" --definitions="$here/repart" "$output"
