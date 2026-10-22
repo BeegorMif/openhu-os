@@ -4,7 +4,8 @@ Minimal Linux images for [OpenHU](https://github.com/average-web-dev/openhu), th
 Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
 
 > [!NOTE]
-> Work in progress: x86_64 (UEFI) images, developed in a VM. Raspberry Pi later.
+> Work in progress: x86_64 (UEFI) images, developed in a VM, and a first Raspberry Pi 4/5 image (arm64,
+> [#39](https://github.com/average-web-dev/openhu-os/issues/39); updates on the Pi still to come).
 
 ## What is in the image
 
@@ -43,7 +44,8 @@ Raspberry Pi and Linux. Flash it, boot it, and OpenHU starts.
   or pulling the stick never harms it. Updates from a stick, see below.
 
 Planned ([roadmap](https://github.com/average-web-dev/openhu/issues/1)): signed checksums
-([#21](https://github.com/average-web-dev/openhu-os/issues/21)), Raspberry Pi 4/5.
+([#21](https://github.com/average-web-dev/openhu-os/issues/21)), A/B updates on the Raspberry Pi
+([#39](https://github.com/average-web-dev/openhu-os/issues/39)).
 
 ## The openhu-cli command
 
@@ -195,6 +197,39 @@ Profiles:
 | Console | root shell without a login on the text consoles (Ctrl+Alt+F2 switches away from cage, Ctrl+Alt+F1 back) and the serial console (`ttyS0`) | the same on the text consoles; a serial console only where the hardware's console is serial (no `console=`) |
 | Tools | `grim` (screenshots), strace, libinput-tools, … | none (`openhu-cli` in both) |
 
+## Raspberry Pi 4 / 5
+
+One arm64 image for both boards, `openhu-os-rpi_<version>.raw`
+([#39](https://github.com/average-web-dev/openhu-os/issues/39)):
+
+```bash
+scripts/arm64-binfmt.sh                          # x86 host only, once per boot: qemu-user for arm64 programs
+ARCH=arm64 scripts/fetch-debs.sh                 # the arm64 openhu + libaasdk packages
+scripts/build.sh --arch arm64                    # dev image (--profile release as on x86)
+```
+
+`arm64-binfmt.sh` installs nothing on the host: it registers Debian's static `qemu-aarch64` from a container
+(`--remove` takes it back). The first build takes about 10 minutes under emulation, the cache is the Docker volume
+`openhu-os-cache-arm64`.
+
+The Pi firmware boots from FAT partitions, not UEFI: mkosi builds only the directory tree, `rpi/assemble.sh` makes the
+boot partition and the GPT disk from it.
+
+| # | Partition | Content |
+|---|---|---|
+| 1 | `openhu-autoboot` (FAT, 64 MB) | `autoboot.txt`: boot partition 2, or once 5 after `reboot "0 tryboot"` |
+| 2 | `openhu-boot_<version>` (FAT, 256 MB) | slot A: `start4.elf`, `kernel8.img` (Pi 4) and `kernel_2712.img` (Pi 5) with `initramfs8`/`initramfs_2712`, device trees, overlays, `config.txt` (`rpi/config.txt`), `cmdline.txt` with `root=PARTLABEL=openhu_<version>` |
+| 3 | `openhu_<version>` (erofs, 3 GB) | root slot A, as on x86 |
+| 4, 5, 6 | first boot | root slot B, boot partition B, `openhu-data` |
+
+Kernels and firmware come from the Raspberry Pi archive (the Pi kernel has the Pi's video decoders), everything else
+from Debian: an APT pin (`rpi/sandbox/etc/apt/preferences.d/raspberrypi`) allows only the listed packages from it.
+The build also writes `openhu-os-rpi_<version>.root.raw` and `.boot.raw`, the partitions of a future update.
+
+Flash it to an SD card (16 GB or more) or a USB SSD with the Raspberry Pi Imager ("Use custom") or
+`dd if=mkosi.output/openhu-os-rpi_<version>.raw of=/dev/<card> bs=4M conv=fsync`. The dev image has ssh with the key
+in `local/id_ed25519` (`ssh -i local/id_ed25519 root@openhu.local`) and a serial console on GPIO 14/15.
+
 ## Run in a VM
 
 ```bash
@@ -306,13 +341,15 @@ host first (e.g. the openhu dev container), they would grab the phone.
 mkosi.conf, mkosi.conf.d/   distribution, packages (base, session, openhu, kernel)
 mkosi.profiles/             dev and release
 mkosi.repart/               partitions of the image: ESP, root slot A (erofs, also split out as the update)
+rpi/                        Raspberry Pi: config.txt, autoboot.txt, assemble.sh (boot partition and disk), repart/
+                            (its partitions), extra/ (first boot partitions), sandbox/ (Raspberry Pi archive, APT pin)
 mkosi.extra/                files in the image: session unit, sysusers, PAM, polkit, presets, journald, the openhu
                             command and its helpers, first boot partitions (usr/lib/repart.d: slot B, data), fstab for /var,
                             boot check, USB sticks (udev rule, openhu-usb@.service)
 mkosi.postinst.chroot       users, default target, masks of boot units, ssh and os-release setup
 mkosi.finalize              empty machine id (read-only /etc)
 scripts/                    build, fetch-debs, run-vm, ssh, screenshot, powerloss-test, update-test, add-update,
-                            serve-updates, release, usb-stick
+                            serve-updates, release, usb-stick, arm64-binfmt
 .github/workflows/image.yml CI: build, VM test, release on tags
 host/                       udev rule for the development host
 ```
