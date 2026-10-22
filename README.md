@@ -305,7 +305,7 @@ mkosi.repart/               partitions of the image: ESP, root slot A (erofs, al
 mkosi.extra/                files in the image: session unit, sysusers, PAM, polkit, presets, journald, the openhu
                             command and its helpers, first boot partitions (usr/lib/repart.d: slot B, data), fstab for /var,
                             boot check, USB sticks (udev rule, openhu-usb@.service)
-mkosi.postinst.chroot       users, masks the package's openhu.service (root, eglfs) until openhu#8
+mkosi.postinst.chroot       users, default target, masks of boot units, ssh and os-release setup
 mkosi.finalize              empty machine id (read-only /etc)
 scripts/                    build, fetch-debs, run-vm, ssh, screenshot, powerloss-test, update-test, add-update,
                             serve-updates, release, usb-stick

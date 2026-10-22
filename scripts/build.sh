@@ -44,7 +44,7 @@ cat > "$stage/DEBIAN/control" <<CONTROL
 Package: openhu-os-splash
 Version: $splash_version
 Architecture: all
-Maintainer: OpenHU <https://github.com/average-web-dev/openhu-os>
+Maintainer: Leon Strauß <openhu.dev@alias.strauss-hub.de>
 Depends: plymouth
 Section: misc
 Priority: optional
