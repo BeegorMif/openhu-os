@@ -4,11 +4,13 @@
 # (background only) or a text console do not pass. The last screenshot stays in vm/release/screen.ppm.
 #
 #   scripts/release-smoke-test.sh [IMAGE]      default: the newest image in mkosi.output
-# OPENHU_VM_OPTS: more run-vm.sh options, e.g. --no-gl on a host without GPU (CI)
+# OPENHU_VM_OPTS: more run-vm.sh options, e.g. --no-gl on a host without GPU (CI), --arch arm64 for an arm64 image
+# OPENHU_SMOKE_TIMEOUT: seconds to wait for the shell, default 90 (KVM); an emulated arm64 VM (TCG) needs far more
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="$REPO/vm/release"
+TIMEOUT="${OPENHU_SMOKE_TIMEOUT:-90}"
 image=()
 [ $# -gt 0 ] && image=(--image "$1")
 
@@ -21,7 +23,7 @@ trap 'kill -9 $QEMU 2>/dev/null || true' EXIT
 qmp() { printf '{"execute":"qmp_capabilities"}\n%s\n' "$1" | socat - UNIX-CONNECT:"$DIR/qmp.sock" 2>/dev/null; }
 
 start=$SECONDS
-while [ $((SECONDS - start)) -lt 90 ]; do
+while [ $((SECONDS - start)) -lt "$TIMEOUT" ]; do
   sleep 5
   kill -0 $QEMU 2>/dev/null || { echo "FAIL: QEMU ended" >&2; exit 1; }
   qmp "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"$DIR/screen.ppm\"}}" >/dev/null || continue
@@ -45,5 +47,5 @@ PY
     exit 0
   fi
 done
-echo "FAIL: no OpenHU shell on screen within 90 s, last screenshot $DIR/screen.ppm" >&2
+echo "FAIL: no OpenHU shell on screen within $TIMEOUT s, last screenshot $DIR/screen.ppm" >&2
 exit 1

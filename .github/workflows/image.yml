@@ -41,6 +41,24 @@ jobs:
       - name: Build ARM64 release image
         run: scripts/build.sh --profile release --architecture arm64 --version "$VERSION"
 
+      # Boots the image in an emulated arm64 UEFI VM (QEMU "virt" + AAVMF; no KVM on the hosted ARM runners, so
+      # TCG: slow). Checks the image, not Raspberry Pi hardware. Not blocking until it has run green a few times.
+      - name: Install QEMU for arm64
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-arm qemu-efi-aarch64 socat >/dev/null
+
+      - name: Test ARM64 release image (QEMU virt)
+        continue-on-error: true
+        env:
+          OPENHU_VM_OPTS: --arch arm64 --no-gl
+          OPENHU_SMOKE_TIMEOUT: 900
+        run: scripts/release-smoke-test.sh "mkosi.output/openhu-os_$VERSION.raw"
+
+      - name: Serial console of the ARM64 test VM
+        if: always()
+        run: tail -n 100 vm/release/serial.log || true
+
       - name: Package ARM64 release files
         run: scripts/release.sh "$VERSION" dist
 

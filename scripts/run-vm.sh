@@ -5,6 +5,9 @@
 #   scripts/run-vm.sh [--fresh] [--no-gl] [--res WxH] [--headless] [--phone VID:PID,...] [--ui gtk|x11|sdl]
 #                     [--instance NAME --ssh-port PORT] [--no-phone] [--wifi] [--eth2 PORT] [--plugins PLUGINS]
 #
+#   --arch A    x86-64 (default, KVM) or arm64 (QEMU "virt" machine with AAVMF firmware: KVM on an arm64 host with
+#               /dev/kvm, otherwise TCG emulation, slow: minutes to boot). Also OPENHU_VM_ARCH. Needs the packages
+#               qemu-system-arm and qemu-efi-aarch64. This tests the image, not the Raspberry Pi hardware.
 #   --fresh     new disk from the newest image (and fresh UEFI variables)
 #   --image F   with --fresh: this image instead of the newest (e.g. an older version to test updates)
 #   --no-gl     virtual GPU without 3D (cage/wlroots render with pixman, Qt with llvmpipe: slow video)
@@ -23,7 +26,8 @@
 #               cable): VMs started with the same PORT see each other, e.g. the head unit as DHCP server and a
 #               second instance as a device (openhu-cli ethernet mode, #15). No root or tap device needed.
 #   --plugins D   share the host folder D into the guest (9p, mount tag "plugins"); default ../openhu-plugins if it exists
-#   --no-plugins  no plugins share (a second VM next to the first, CI)#   --instance  a second VM with its own disk, UEFI variables and QMP socket in vm/NAME/ (scripts/powerloss-test.sh);
+#   --no-plugins  no plugins share (a second VM next to the first, CI)
+#   --instance  a second VM with its own disk, UEFI variables and QMP socket in vm/NAME/ (scripts/powerloss-test.sh);
 #               needs its own --ssh-port (scripts/ssh.sh: OPENHU_VM_SSH_PORT=PORT)
 #
 # ssh: scripts/ssh.sh (port 2222), screenshot: scripts/screenshot.sh. Serial console on this terminal (Ctrl+A X
@@ -32,14 +36,14 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 VM="$REPO/vm"
-OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
-OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
 # fixed: systemd derives the machine id from it in a VM
 VM_UUID=6f70656e-6875-4f53-8000-000000000001
+ARCH="${OPENHU_VM_ARCH:-x86-64}"
 IMAGE=""; FRESH=0; GL=1; RES=1920x1080; HEADLESS=0; PHONE=""; UI=sdl; PHONES=1; SSH_PORT=2222; WIFI=1; ETH2=""; PLUGINS="$REPO/../openhu-plugins/plugins"
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --arch) ARCH="$2"; shift 2 ;;
     --fresh) FRESH=1; shift ;;
     --image) IMAGE="$2"; shift 2 ;;
     --no-gl) GL=0; shift ;;
@@ -58,6 +62,32 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# What differs per architecture: QEMU binary, UEFI firmware (pflash), machine/CPU/accelerator, virtual GPU
+case "$ARCH" in
+  x86-64)
+    QEMU=qemu-system-x86_64
+    OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+    OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
+    machine=(-machine q35,accel=kvm,vmport=off -cpu host)
+    GPU=virtio-vga; GPU_GL=virtio-vga-gl ;;
+  arm64)
+    QEMU=qemu-system-aarch64
+    OVMF_CODE=/usr/share/AAVMF/AAVMF_CODE.fd
+    OVMF_VARS=/usr/share/AAVMF/AAVMF_VARS.fd
+    if [ "$(uname -m)" = aarch64 ] && [ -w /dev/kvm ]; then
+      machine=(-machine virt,accel=kvm -cpu host)
+    else
+      echo "arm64 VM without KVM: TCG emulation, expect a slow boot" >&2
+      machine=(-machine virt,accel=tcg -cpu max,pauth-impdef=on)
+    fi
+    GPU=virtio-gpu-pci; GPU_GL=virtio-gpu-gl-pci ;;
+  *) echo "unknown --arch $ARCH (x86-64 or arm64)" >&2; exit 1 ;;
+esac
+for f in "$OVMF_CODE" "$OVMF_VARS"; do
+  [ -f "$f" ] || { echo "$f missing: install ovmf (x86-64) or qemu-efi-aarch64 (arm64)" >&2; exit 1; }
+done
+command -v "$QEMU" >/dev/null || { echo "$QEMU missing: install qemu-system-x86 or qemu-system-arm" >&2; exit 1; }
+
 mkdir -p "$VM"
 if [ "$FRESH" = 1 ] || [ ! -f "$VM/disk.raw" ]; then
   image="${IMAGE:-$(ls -t "$REPO"/mkosi.output/openhu-os_*.raw 2>/dev/null | grep -v '\.root\.raw$' | head -1)}"
@@ -71,11 +101,11 @@ fi
 xres="${RES%x*}"; yres="${RES#*x}"
 if [ "$HEADLESS" = 1 ] && [ "$GL" = 1 ]; then
   # 3D like the window, read back by QEMU: screenshots work (scripts/screenshot.sh)
-  display=(-device "virtio-vga-gl,xres=$xres,yres=$yres" -display egl-headless)
+  display=(-device "$GPU_GL,xres=$xres,yres=$yres" -display egl-headless)
 elif [ "$HEADLESS" = 1 ]; then
-  display=(-device "virtio-vga,xres=$xres,yres=$yres" -display none)
+  display=(-device "$GPU,xres=$xres,yres=$yres" -display none)
 else
-  gpu=virtio-vga; [ "$GL" = 1 ] && gpu=virtio-vga-gl
+  gpu="$GPU"; [ "$GL" = 1 ] && gpu="$GPU_GL"
   case "$UI" in
     gtk|x11) ui="gtk,zoom-to-fit=off" ;;
     sdl) ui="sdl" ;;
@@ -132,7 +162,7 @@ if [ ${#cmdline[@]} -gt 0 ]; then
   extra+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=${cmdline_str//,/,,}")
 fi
 
-exec qemu-system-x86_64 -name openhu-os -nodefaults -machine q35,accel=kvm,vmport=off -cpu host -smp 4 -m 4096 -uuid "$VM_UUID" \
+exec "$QEMU" -name openhu-os -nodefaults "${machine[@]}" -smp 4 -m 4096 -uuid "$VM_UUID" \
   -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
   -drive if=pflash,format=raw,unit=1,file="$VM/OVMF_VARS.fd" \
   -drive if=none,id=disk0,format=raw,file="$VM/disk.raw",cache=writeback,discard=unmap \
