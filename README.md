@@ -217,10 +217,16 @@ boot partition and the GPT disk from it.
 
 | # | Partition | Content |
 |---|---|---|
-| 1 | `openhu-autoboot` (FAT, 64 MB) | `autoboot.txt`: boot partition 2, or once 5 after `reboot "0 tryboot"` |
+| 1 | `openhu-autoboot` (FAT, 64 MB) | `autoboot.txt`: boot partition 2, or once 3 after `systemctl reboot --reboot-argument="0 tryboot"` |
 | 2 | `openhu-boot_<version>` (FAT, 256 MB) | slot A: `start4.elf`, `kernel8.img` (Pi 4) and `kernel_2712.img` (Pi 5) with `initramfs8`/`initramfs_2712`, device trees, overlays, `config.txt` (`rpi/config.txt`), `cmdline.txt` with `root=PARTLABEL=openhu_<version>` |
-| 3 | `openhu_<version>` (erofs, 3 GB) | root slot A, as on x86 |
-| 4, 5, 6 | first boot | root slot B, boot partition B, `openhu-data` |
+| 3 | `_empty` (FAT, 256 MB) | boot partition of slot B |
+| 4 | `openhu_<version>` (erofs, 3 GB) | root slot A, as on x86 |
+| 5, 6 | first boot | root slot B, `openhu-data` |
+
+The firmware counts `boot_partition=` in FAT partitions (the n-th FAT partition of the table,
+[rpi-eeprom#654](https://github.com/raspberrypi/rpi-eeprom/issues/654)), so the three FAT partitions come first and
+boot partition B is in the image already. Tested on a Pi 4: `tryboot` starts slot B once, a normal reboot is back on
+A, `autoboot.txt` with the numbers swapped keeps B.
 
 Kernels and firmware come from the Raspberry Pi archive (the Pi kernel has the Pi's video decoders), everything else
 from Debian: an APT pin (`rpi/sandbox/etc/apt/preferences.d/raspberrypi`) allows only the listed packages from it.
