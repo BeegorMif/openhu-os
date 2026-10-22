@@ -27,8 +27,8 @@ while [ $# -gt 0 ]; do
 done
 
 case "$ARCH" in
-  x86-64) DEB_ARCH=amd64; IMAGE_ID=openhu-os; CACHE=openhu-os-cache ;;
-  arm64) DEB_ARCH=arm64; IMAGE_ID=openhu-os-rpi; CACHE=openhu-os-cache-arm64 ;;
+  x86-64) DEB_ARCH=amd64; NAME=openhu-os; CACHE=openhu-os-cache ;;
+  arm64) DEB_ARCH=arm64; NAME=openhu-os-rpi; CACHE=openhu-os-cache-arm64 ;;
   *) echo "--arch: x86-64 or arm64" >&2; exit 1 ;;
 esac
 
@@ -78,7 +78,7 @@ chmod 600 local/dev-extra/root/.ssh/authorized_keys
 
 tty=()
 [ -t 0 ] && [ -t 1 ] && tty=(-it)
-echo "Building $IMAGE_ID $VERSION (profile $PROFILE, $ARCH)"
+echo "Building $NAME $VERSION (profile $PROFILE, $ARCH)"
 # mkosi needs mount namespaces and its own /proc in the container. On the Pi mkosi only makes the directory tree,
 # rpi/assemble.sh makes the disk from it (as root: the tree's files belong to root).
 docker run --rm "${tty[@]}" --privileged \
@@ -92,6 +92,6 @@ docker run --rm "${tty[@]}" --privileged \
       rpi/assemble.sh "mkosi.output/$5_$2" "$1" "mkosi.output/$5_$2.raw"
       rm -rf "mkosi.output/$5_$2"
     fi
-    chown -R "$3" mkosi.output' _ "$PROFILE" "$VERSION" "$(id -u):$(id -g)" "$ARCH" "$IMAGE_ID" "${EXTRA[@]}"
+    chown -R "$3" mkosi.output' _ "$PROFILE" "$VERSION" "$(id -u):$(id -g)" "$ARCH" "$NAME" "${EXTRA[@]}"
 
-ls -lh mkosi.output/"$IMAGE_ID"_"$VERSION"*.raw
+ls -lh mkosi.output/"$NAME"_"$VERSION"*.raw
