@@ -222,27 +222,19 @@ Editing `cmdline.txt` on the boot partition by hand works for a test, but an upd
 The Pi firmware boots from FAT partitions, not UEFI: mkosi builds only the directory tree, `rpi/assemble.sh` makes the
 boot partition and the GPT disk from it.
 
+The image uses one firmware-readable FAT boot partition followed by its read-only root and writable data:
+
 | # | Partition | Content |
 |---|---|---|
-| 1 | `openhu-autoboot` (FAT, 64 MB) | `autoboot.txt`: boot partition 2, or once 3 after `systemctl reboot --reboot-argument="0 tryboot"` |
-| 2 | `openhu-boot_<version>` (FAT, 256 MB) | slot A: `start4.elf`, `kernel8.img` (Pi 4) and `kernel_2712.img` (Pi 5) with `initramfs8`/`initramfs_2712`, device trees, overlays, `config.txt` (`rpi/config.txt`), `cmdline.txt` with `root=PARTLABEL=openhu_<version>` |
-| 3 | `_empty` (FAT, 256 MB) | boot partition of slot B |
-| 4 | `openhu_<version>` (erofs, 3 GB) | root slot A, as on x86 |
-| 5, 6 | first boot | root slot B, `openhu-data` |
+| 1 | `openhu-boot_<version>` (FAT, 512 MB) | `start4.elf`, `kernel8.img` (Pi 4) and `kernel_2712.img` (Pi 5), initrds, device trees, overlays, `config.txt`, `cmdline.txt` |
+| 2 | `openhu_<version>` (erofs, 3 GB) | root filesystem; the kernel command line selects it with `root=PARTLABEL=openhu_<version>` |
+| 3 | first boot | `openhu-data` (ext4), mounted at `/var`, grows to use the remaining disk |
 
-The firmware counts `boot_partition=` in FAT partitions (the n-th FAT partition of the table,
-[rpi-eeprom#654](https://github.com/raspberrypi/rpi-eeprom/issues/654)), so the three FAT partitions come first and
-boot partition B is in the image already. Tested on a Pi 4: `tryboot` starts slot B once, a normal reboot is back on
-A, `autoboot.txt` with the numbers swapped keeps B.
+Pi images are single-slot and do not support in-place OS updates. To install a newer version, flash a newly built image;
+back up any needed data from `/var` first. This keeps the firmware boot path and partition layout simple.
 
 Kernels and firmware come from the Raspberry Pi archive (the Pi kernel has the Pi's video decoders), everything else
 from Debian: an APT pin (`rpi/sandbox/etc/apt/preferences.d/raspberrypi`) allows only the listed packages from it.
-The build also writes `openhu-os-rpi_<version>.root.raw` and `.boot.raw`, the partitions of a future update.
-
-The Pi 4 needs a bootloader (EEPROM) from 2022-11-25 or newer for `tryboot_a_b` in `autoboot.txt`: older ones stop
-at partition 1. The bootloader's screen (HDMI, no boot) shows its date. To update it, write "Misc utility images →
-Bootloader (Pi 4 family) → SD Card Boot" with the Raspberry Pi Imager to a card and boot the Pi from it once (green
-screen when done). The Pi 5 has a new enough bootloader from the factory.
 
 Flash it to an SD card (16 GB or more) or a USB SSD with the Raspberry Pi Imager ("Use custom") or
 `dd if=mkosi.output/openhu-os-rpi_<version>.raw of=/dev/<card> bs=4M conv=fsync`. The dev image has ssh with the key
