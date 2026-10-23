@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Builds the OpenHU OS image with mkosi in a Debian trixie container. The image lands in mkosi.output/.
 #
-#   scripts/build.sh [--profile dev|release] [--version VERSION] [--arch x86-64|arm64] [extra mkosi arguments]
+#   scripts/build.sh [--profile dev|release] [--version VERSION] [--arch x86-64|arm64]
+#                    [--rotate 180 --hdmi-mode WxH[@HZ]] [extra mkosi arguments]
+#
+# --rotate 180 (Pi only): the display is mounted upside down. Adds video=HDMI-A-1:<mode>,rotate=180 (the first HDMI
+# output) and the flag openhu.rotate180 to the kernel command line (cmdline.txt); rpi/extra's udev rule then gives the
+# touchscreen the matching calibration matrix. --hdmi-mode is the display's native mode, e.g. 1024x600@60.
 #
 # x86-64 (default): PC/VM image openhu-os_<version>.raw. arm64: Raspberry Pi 4/5 image openhu-os-rpi_<version>.raw
 # (#39); on an x86 host this needs qemu-user for arm64 registered with binfmt (scripts/arm64-binfmt.sh).
@@ -15,6 +20,8 @@ PROFILE="dev"
 # dots only: "_", "-" and "+" have a meaning in the update and boot counting file names
 VERSION="${OPENHU_OS_VERSION:-$(date -u +%Y.%m.%d.%H%M)}"
 ARCH="x86-64"
+ROTATE=0
+HDMI_MODE=""
 EXTRA=()
 
 while [ $# -gt 0 ]; do
@@ -22,6 +29,8 @@ while [ $# -gt 0 ]; do
     --profile) PROFILE="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
     --arch) ARCH="$2"; shift 2 ;;
+    --rotate) ROTATE="$2"; shift 2 ;;
+    --hdmi-mode) HDMI_MODE="$2"; shift 2 ;;
     *) EXTRA+=("$1"); shift ;;
   esac
 done
@@ -30,6 +39,18 @@ case "$ARCH" in
   x86-64) DEB_ARCH=amd64; NAME=openhu-os; CACHE=openhu-os-cache ;;
   arm64) DEB_ARCH=arm64; NAME=openhu-os-rpi; CACHE=openhu-os-cache-arm64 ;;
   *) echo "--arch: x86-64 or arm64" >&2; exit 1 ;;
+esac
+
+# Upside-down display: both parameters go to the kernel command line (mkosi appends --kernel-command-line to the
+# image's own), cmdline.txt of the Pi's boot partition gets them from there (rpi/assemble.sh)
+case "$ROTATE" in
+  0) [ -z "$HDMI_MODE" ] || { echo "--hdmi-mode only goes with --rotate 180" >&2; exit 1; } ;;
+  180)
+    [ "$ARCH" = arm64 ] || { echo "--rotate is for the Raspberry Pi image (--arch arm64)" >&2; exit 1; }
+    [[ "$HDMI_MODE" =~ ^[0-9]+x[0-9]+(@[0-9]+)?$ ]] || {
+      echo "--rotate 180 needs --hdmi-mode WxH[@HZ], the display's native mode (e.g. 1024x600@60)" >&2; exit 1; }
+    EXTRA+=("--kernel-command-line=video=HDMI-A-1:$HDMI_MODE,rotate=180" "--kernel-command-line=openhu.rotate180") ;;
+  *) echo "--rotate: 0 or 180" >&2; exit 1 ;;
 esac
 
 cd "$REPO"

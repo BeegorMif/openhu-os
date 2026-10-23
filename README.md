@@ -208,6 +208,13 @@ ARCH=arm64 scripts/fetch-debs.sh                 # the arm64 openhu + libaasdk p
 scripts/build.sh --arch arm64                    # dev image (--profile release as on x86)
 ```
 
+A display that is mounted upside down: `scripts/build.sh --arch arm64 --rotate 180 --hdmi-mode 1024x600@60` (the
+display's native mode). It adds `video=HDMI-A-1:1024x600@60,rotate=180` (the first HDMI output) and `openhu.rotate180`
+to `cmdline.txt`; `rpi/extra/usr/lib/udev/rules.d/81-openhu-touch-rotate.rules` then gives the touchscreen the 180
+degree calibration matrix, only when the command line rotates the video. cage has no rotation of its own, so whether
+the kernel's `rotate=` reaches the picture has to be checked on the Pi; `libinput list-devices` shows the matrix.
+Editing `cmdline.txt` on the boot partition by hand works for a test, but an update replaces it with the image's.
+
 `arm64-binfmt.sh` installs nothing on the host: it registers Debian's static `qemu-aarch64` from a container
 (`--remove` takes it back). The first build takes about 10 minutes under emulation, the cache is the Docker volume
 `openhu-os-cache-arm64`.
