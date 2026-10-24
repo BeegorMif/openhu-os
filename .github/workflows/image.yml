@@ -40,7 +40,8 @@ jobs:
 
       - name: OpenHU packages
         env:
-          GH_TOKEN: ${{ github.token }}
+          # GITHUB_TOKEN is scoped to this repository; the OpenHU artifacts live in another repository.
+          GH_TOKEN: ${{ secrets.OPENHU_PACKAGES_TOKEN }}
         run: |
           scripts/fetch-debs.sh
           ls packages | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
