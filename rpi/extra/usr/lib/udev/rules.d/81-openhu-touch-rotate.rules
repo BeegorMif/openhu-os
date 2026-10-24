@@ -1,0 +1,12 @@
+# Display mounted upside down (scripts/build.sh --rotate 180): the touchscreen gets the 180 degree calibration matrix
+# (libinput: -1 0 1 / 0 -1 1) only when the kernel command line also rotates the video output. Without that, neither
+# line matches and the touchscreen is left alone.
+# 1. video=<connector>:<mode>,rotate=180 itself, imported with its value
+# 2. the flag openhu.rotate180, which build.sh adds next to it (a flag is imported as "1", for a parameter with a
+#    value the udev manual does not say how it is stored, so this line keeps the rule working either way)
+ACTION=="add|change", SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", \
+  IMPORT{cmdline}="video", ENV{video}=="*rotate=180*", \
+  ENV{LIBINPUT_CALIBRATION_MATRIX}="-1 0 1 0 -1 1"
+ACTION=="add|change", SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", \
+  IMPORT{cmdline}="openhu.rotate180", ENV{openhu.rotate180}=="1", \
+  ENV{LIBINPUT_CALIBRATION_MATRIX}="-1 0 1 0 -1 1"

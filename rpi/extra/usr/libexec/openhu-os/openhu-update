@@ -1,0 +1,9 @@
+#!/bin/sh
+if [ " ${*} " = "  " ]; then
+    set -- status
+fi
+case " $* " in
+    *" --json "*) printf '%s\n' '{"error":"OS updates are disabled on this single-slot Raspberry Pi image"}' ;;
+    *) echo "OS updates are disabled on this single-slot Raspberry Pi image." >&2 ;;
+esac
+exit 1

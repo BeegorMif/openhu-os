@@ -1,0 +1,65 @@
+#!/usr/bin/python3
+# Notify relay of openhu-session.service (openhu#129): passes OpenHU's READY=1 and watchdog pings on to systemd.
+#
+# PAMName= (pam_systemd) moves cage and OpenHU into the logind session scope, so the service's own cgroup is empty.
+# systemd takes a notification only from a process in the unit's cgroup or from its main pid (cage), even with
+# NotifyAccess=all; OpenHU's own messages would go to the session scope and the start would time out. This relay is
+# started by ExecStartPre=+ (no PAM session for "+"), stays in the service's cgroup and forwards OpenHU's datagrams,
+# which OpenHU sends to $NOTIFY_SOCKET (the unit points it here). systemd logs it once per start as a "left-over
+# process" of ExecStartPre: that is this relay.
+#
+# If the relay ends, the pings end too and the watchdog restarts the session: it fails safe.
+#
+#   notify-relay <listen socket> [systemd's socket, default /run/systemd/notify]
+import os
+import signal
+import socket
+import sys
+
+# what OpenHU may tell systemd; MAINPID=, FDSTORE= and the like are not passed on
+ALLOWED = (b"READY=", b"WATCHDOG=", b"WATCHDOG_USEC=", b"STATUS=", b"STOPPING=", b"RELOADING=", b"MONOTONIC_USEC=",
+           b"EXTEND_TIMEOUT_USEC=", b"ERRNO=")
+
+
+def main():
+    if len(sys.argv) not in (2, 3):
+        print("usage: notify-relay <listen socket> [systemd's socket]", file=sys.stderr)
+        return 2
+    listen = sys.argv[1]
+    target = sys.argv[2] if len(sys.argv) == 3 else "/run/systemd/notify"
+
+    receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        os.unlink(listen)
+    except FileNotFoundError:
+        pass
+    # only the same user (OpenHU) may send
+    umask = os.umask(0o177)
+    receiver.bind(listen)
+    os.umask(umask)
+    sender = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+
+    # Bound: ExecStartPre ends here and cage starts, the relay keeps running in the background. ExecStartPre has the
+    # tty (TTYPath=): when this process ends or the tty is hung up for cage (TTYVHangup=), the tty's processes get
+    # SIGHUP, possibly before the child's setsid().
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0)
+    os.close(devnull)
+    if os.fork():
+        os._exit(0)
+    os.setsid()
+
+    while True:
+        message = receiver.recv(4096)
+        lines = [line for line in message.split(b"\n") if line.startswith(ALLOWED)]
+        if not lines:
+            continue
+        try:
+            sender.sendto(b"\n".join(lines), target)
+        except OSError as error:
+            print(f"notify-relay: {target}: {error}", file=sys.stderr, flush=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

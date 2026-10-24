@@ -1,0 +1,19 @@
+# Keymap of the text consoles (#35). Debian's systemd has no systemd-vconsole-setup (console-setup does that job
+# there), so nothing would apply KEYMAP= of /etc/vconsole.conf (written by mkosi.conf Keymap=). The kernel's keymap
+# is shared by all virtual consoles, so one loadkeys covers tty2 and the others.
+[Unit]
+Description=OpenHU OS: keymap of the text consoles
+DefaultDependencies=no
+After=local-fs.target systemd-udevd.service
+Before=getty@.service sysinit.target
+ConditionPathExists=/etc/vconsole.conf
+ConditionPathExists=/dev/tty0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/vconsole.conf
+ExecStart=/usr/bin/loadkeys --quiet -C /dev/tty0 ${KEYMAP}
+
+[Install]
+WantedBy=sysinit.target
