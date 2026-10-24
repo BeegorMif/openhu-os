@@ -171,7 +171,9 @@ e.g. `v2026.10.13`) publishes the release; release images update from `releases/
 
 ## Build
 
-Needs Docker, the GitHub CLI (`gh`, for the packages) and, for the VM, QEMU with KVM and OVMF.
+Needs Docker, the GitHub CLI (`gh`, for the packages) and, for the VM, QEMU with KVM and OVMF. The image workflow
+downloads artifacts from `BeegorMif/openhu`; add an `OPENHU_PACKAGES_TOKEN` Actions secret with Actions read access to
+that repository.
 
 ```bash
 scripts/fetch-debs.sh           # openhu + libaasdk from the newest openhu CI build into packages/
