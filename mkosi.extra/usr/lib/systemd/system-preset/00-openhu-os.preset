@@ -12,4 +12,6 @@ enable fstrim.timer
 enable openhu-ethernet-firewall.service
 enable avahi-daemon.service
 enable avahi-daemon.socket
+# keymap of the text consoles (#35)
+enable openhu-console-keymap.service
 disable *

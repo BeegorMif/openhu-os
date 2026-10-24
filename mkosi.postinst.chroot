@@ -1,10 +1,8 @@
 #!/bin/sh
-# The openhu package's own unit runs as root with eglfs (openhu#8); openhu-session.service replaces it.
 set -e
 # users and their directories from mkosi.extra (sysusers.d, tmpfiles.d); systemd does not apply them at boot
 systemd-sysusers
 systemd-tmpfiles --create --prefix=/var/lib/openhu
-systemctl mask openhu.service
 # OpenHU is not in PATH: only openhu-session starts it (openhu-cli start | stop | restart), "openhu" would be
 # mistaken for the command line openhu-cli. The package links /usr/bin/openhu to it.
 [ -x /usr/libexec/openhu/openhu ] || { echo "openhu package without /usr/libexec/openhu/openhu (older than openhu#20)" >&2; exit 1; }
@@ -34,6 +32,10 @@ sed -i -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"OpenHU OS $IMAGE_VERSION ($debian)\"|
        -e 's|^SUPPORT_URL=.*|SUPPORT_URL="https://github.com/BeegorMif/openhu-os"|' \
        -e 's|^BUG_REPORT_URL=.*|BUG_REPORT_URL="https://github.com/BeegorMif/openhu-os/issues"|' \
        /usr/lib/os-release
+# Raspberry Pi image (#39): IMAGE_ID stays openhu-os, the board is the variant
+if [ "$ARCHITECTURE" = arm64 ]; then
+  printf 'VARIANT="Raspberry Pi"\nVARIANT_ID=rpi\n' >> /usr/lib/os-release
+fi
 printf 'OpenHU OS %s \\n \\l\n\n' "$IMAGE_VERSION" > /etc/issue
 printf 'OpenHU OS %s\n' "$IMAGE_VERSION" > /etc/issue.net
 # Login greeting: /etc/update-motd.d/10-openhu-os instead of Debian's uname line (/etc/motd is empty, mkosi.extra)

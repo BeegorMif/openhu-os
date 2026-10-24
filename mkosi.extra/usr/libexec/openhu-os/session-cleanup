@@ -1,0 +1,18 @@
+#!/bin/sh
+# ExecStopPost of openhu-session.service (openhu#129): after a watchdog timeout or a start that timed out, kill what is
+# left of OpenHU's logind session. systemd's signals only reach the service's own cgroup (the notify relay) and its
+# main process (cage); OpenHU and its plugins live in the session scope (PAMName=). A hung OpenHU does not end with
+# cage, it would keep running there and keep its instance lock: every new start would end right away ("already
+# running"). A regular stop or a crash is left alone, there OpenHU shuts down by itself.
+case "${SERVICE_RESULT:-}" in
+  watchdog|timeout) ;;
+  *) exit 0 ;;
+esac
+
+for session in $(loginctl list-sessions --no-legend | awk '{print $1}'); do
+  if [ "$(loginctl show-session "$session" -p Service --value 2>/dev/null)" = openhu-session ]; then
+    echo "killing what is left of session $session ($SERVICE_RESULT)"
+    loginctl kill-session --signal=SIGKILL "$session"
+  fi
+done
+exit 0
