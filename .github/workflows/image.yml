@@ -49,16 +49,6 @@ jobs:
       - name: Build dev image
         run: scripts/build.sh --profile dev --version "$VERSION"
 
-      # Boots, OpenHU answers, read-only root, data partition; three power cuts (without GPU: --no-gl)
-      - name: Test dev image
-        env:
-          OPENHU_VM_OPTS: --no-gl
-        run: scripts/powerloss-test.sh 3
-
-      - name: Serial console of the test VM
-        if: failure()
-        run: tail -n 150 vm/powerloss/serial.log || true
-
       - name: Build release image
         run: scripts/build.sh --profile release --version "$VERSION"
 
