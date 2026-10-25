@@ -41,6 +41,9 @@ case "$ARCH" in
   *) echo "--arch: x86-64 or arm64" >&2; exit 1 ;;
 esac
 
+# Always build against the newest successful OpenHU CI artifact.
+ARCH="$DEB_ARCH" "$REPO/scripts/fetch-debs.sh"
+
 # Upside-down display: both parameters go to the kernel command line (mkosi appends --kernel-command-line to the
 # image's own), cmdline.txt of the Pi's boot partition gets them from there (rpi/assemble.sh)
 case "$ROTATE" in
