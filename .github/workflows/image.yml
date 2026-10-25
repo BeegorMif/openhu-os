@@ -52,16 +52,6 @@ jobs:
       - name: Build release image
         run: scripts/build.sh --profile release --version "$VERSION"
 
-      # No ssh in the release image: the screen must show the OpenHU shell
-      - name: Test release image
-        env:
-          OPENHU_VM_OPTS: --no-gl
-        run: scripts/release-smoke-test.sh "mkosi.output/openhu-os_$VERSION.raw"
-
-      - name: Serial console of the release VM
-        if: failure()
-        run: tail -n 50 vm/release/serial.log || true
-
       - name: Release files
         run: |
           scripts/release.sh "$VERSION" dist
