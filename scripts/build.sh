@@ -4,9 +4,9 @@
 #   scripts/build.sh [--profile dev|release] [--version VERSION] [--arch x86-64|arm64]
 #                    [--rotate 180 --hdmi-mode WxH[@HZ]] [extra mkosi arguments]
 #
-# --rotate 180 (Pi only): the display is mounted upside down. Adds video=HDMI-A-1:<mode>,rotate=180 (the first HDMI
-# output) and the flag openhu.rotate180 to the kernel command line (cmdline.txt); rpi/extra's udev rule then gives the
-# touchscreen the matching calibration matrix. --hdmi-mode is the display's native mode, e.g. 1024x600@60.
+# --rotate 180 (Pi only): rotates the display, selects logo_180.png for the boot splash,
+# and sets openhu.rotate180 so the udev rule can rotate touchscreen coordinates.
+# --hdmi-mode is the display's native mode, e.g. 1024x600@60.
 #
 # x86-64 (default): PC/VM image openhu-os_<version>.raw. arm64: Raspberry Pi 4/5 image openhu-os-rpi_<version>.raw
 # (#39); on an x86 host this needs qemu-user for arm64 registered with binfmt (scripts/arm64-binfmt.sh).
@@ -76,7 +76,15 @@ fi
 stage="$(mktemp -d)"
 splash_version="$(git log -1 --format=%cd --date=format:%Y.%m.%d.%H%M -- splash 2>/dev/null)"
 [ -n "$splash_version" ] || splash_version="$(date -u +%Y.%m.%d.%H%M)"
+
 install -Dm644 -t "$stage/usr/share/plymouth/themes/openhu" splash/theme/*
+
+# Select the logo matching the display orientation.
+if [ "$ROTATE" = 180 ]; then
+  install -Dm644 splash/theme/logo_180.png \
+    "$stage/usr/share/plymouth/themes/openhu/logo.png"
+fi
+
 install -Dm755 splash/postinst "$stage/DEBIAN/postinst"
 cat > "$stage/DEBIAN/control" <<CONTROL
 Package: openhu-os-splash
