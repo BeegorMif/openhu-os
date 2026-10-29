@@ -1,0 +1,10 @@
+# Waveshare touchscreen: rotate input and map it to the rotated display.
+ACTION=="add|change", SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", \
+  IMPORT{cmdline}="video", ENV{video}=="*rotate=180*", \
+  ENV{LIBINPUT_CALIBRATION_MATRIX}="-1 0 1 0 -1 1", \
+  ENV{WL_OUTPUT}="HDMI-A-1"
+
+ACTION=="add|change", SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", \
+  IMPORT{cmdline}="openhu.rotate180", ENV{openhu.rotate180}=="1", \
+  ENV{LIBINPUT_CALIBRATION_MATRIX}="-1 0 1 0 -1 1", \
+  ENV{WL_OUTPUT}="HDMI-A-1"

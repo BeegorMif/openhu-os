@@ -1,3 +1,13 @@
 # USB sticks: read-only under /run/media/<name> while plugged in (openhu-usb@.service), for updates from a stick
 ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", \
   ENV{ID_FS_TYPE}=="vfat|exfat|ntfs|ext4|ext3|ext2", TAG+="systemd", ENV{SYSTEMD_WANTS}+="openhu-usb@%k.service"
+# Waveshare touchscreen: rotate input and map it to the rotated display.
+ACTION=="add|change", SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", \
+  IMPORT{cmdline}="video", ENV{video}=="*rotate=180*", \
+  ENV{LIBINPUT_CALIBRATION_MATRIX}="-1 0 1 0 -1 1", \
+  ENV{WL_OUTPUT}="HDMI-A-1"
+
+ACTION=="add|change", SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", \
+  IMPORT{cmdline}="openhu.rotate180", ENV{openhu.rotate180}=="1", \
+  ENV{LIBINPUT_CALIBRATION_MATRIX}="-1 0 1 0 -1 1", \
+  ENV{WL_OUTPUT}="HDMI-A-1"
