@@ -17,6 +17,8 @@ jobs:
   image:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,9 +41,6 @@ jobs:
           ls -l /dev/kvm
 
       - name: OpenHU packages
-        env:
-          # GITHUB_TOKEN is scoped to this repository; the OpenHU artifacts live in another repository.
-          GH_TOKEN: ${{ github.token }}
         run: |
           scripts/fetch-debs.sh
           ls packages | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
@@ -61,8 +60,6 @@ jobs:
 
       - name: GitHub release
         if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           # what changed since the previous release: OpenHU, libaasdk, pull requests, Debian packages
           scripts/release-notes.sh "$VERSION" > notes.md
