@@ -1,6 +1,0 @@
-# Rotate the Waveshare touchscreen only when OpenHU rotates the display 180 degrees.
-ACTION=="add|change", SUBSYSTEM=="input", KERNEL=="event[0-9]*", \
-  ENV{ID_INPUT_TOUCHSCREEN}=="1", \
-  ATTRS{idVendor}=="0712", ATTRS{idProduct}=="000a", \
-  IMPORT{cmdline}="openhu.rotate180", ENV{openhu.rotate180}=="1", \
-  ENV{LIBINPUT_CALIBRATION_MATRIX}="-1 0 1 0 -1 1"

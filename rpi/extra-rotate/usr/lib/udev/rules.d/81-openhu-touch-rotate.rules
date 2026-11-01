@@ -1,0 +1,4 @@
+# Rotate every touchscreen 180 degrees. Only installed by build.sh --rotate 180.
+ACTION=="add|change", SUBSYSTEM=="input", KERNEL=="event[0-9]*", \
+  ENV{ID_INPUT_TOUCHSCREEN}=="1", \
+  ENV{LIBINPUT_CALIBRATION_MATRIX}="-1 0 1 0 -1 1"

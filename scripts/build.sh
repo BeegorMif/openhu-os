@@ -52,7 +52,8 @@ case "$ROTATE" in
     [ "$ARCH" = arm64 ] || { echo "--rotate is for the Raspberry Pi image (--arch arm64)" >&2; exit 1; }
     [[ "$HDMI_MODE" =~ ^[0-9]+x[0-9]+(@[0-9]+)?$ ]] || {
       echo "--rotate 180 needs --hdmi-mode WxH[@HZ], the display's native mode (e.g. 1024x600@60)" >&2; exit 1; }
-    EXTRA+=("--kernel-command-line=video=HDMI-A-1:$HDMI_MODE,rotate=180" "--kernel-command-line=openhu.rotate180") ;;
+        EXTRA+=("--kernel-command-line=video=HDMI-A-1:$HDMI_MODE,rotate=180" "--kernel-command-line=openhu.rotate180"
+            "--extra-tree=rpi/extra-rotate:/") ;;
   *) echo "--rotate: 0 or 180" >&2; exit 1 ;;
 esac
 
