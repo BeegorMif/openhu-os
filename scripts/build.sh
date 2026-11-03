@@ -206,4 +206,14 @@ docker run --rm "${tty[@]}" --privileged \
     fi
     chown -R "$3" mkosi.output' _ "$PROFILE" "$VERSION" "$(id -u):$(id -g)" "$ARCH" "$NAME" "${EXTRA[@]}"
 
-ls -lh mkosi.output/"$NAME"_"$VERSION"*.raw
+IMAGE_PATH="mkosi.output/${NAME}_${VERSION}.raw"
+
+ls -lh "$IMAGE_PATH"
+
+if [ "$ARCH" = arm64 ]; then
+  echo
+  echo "To flash this image to an SD card or USB drive:"
+  printf 'sudo dd if=%s of=/dev/<card> bs=4M conv=fsync\n' "$IMAGE_PATH"
+  echo
+  echo "Replace /dev/<card> with your actual device (e.g. /dev/sda)."
+fi
