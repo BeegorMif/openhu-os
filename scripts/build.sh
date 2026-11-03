@@ -58,6 +58,85 @@ case "$ROTATE" in
 esac
 
 cd "$REPO"
+
+# Optional Wi-Fi profiles from local/wifi.env
+rm -rf local/wifi-extra
+
+if [ -f local/wifi.env ]; then
+  set -a
+  . local/wifi.env
+  set +a
+fi
+
+if [[ -n "${HOME_WIFI_SSID:-}" || -n "${PHONE_WIFI_SSID:-}" ]]; then
+  install -d -m 700 \
+    local/wifi-extra/usr/lib/NetworkManager/system-connections
+
+  export HOME_WIFI_SSID HOME_WIFI_PASSWORD
+  export PHONE_WIFI_SSID PHONE_WIFI_PASSWORD
+
+  python3 - <<'PY'
+import os
+import uuid
+from pathlib import Path
+
+directory = Path("local/wifi-extra/usr/lib/NetworkManager/system-connections")
+
+profiles = [
+    ("home", "HOME_WIFI", 50),
+    ("phone", "PHONE_WIFI", 100),
+]
+
+def escape(value):
+    return (value.replace("\\", "\\\\")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t"))
+
+for name, prefix, priority in profiles:
+    ssid = os.environ.get(prefix + "_SSID", "")
+    password = os.environ.get(prefix + "_PASSWORD", "")
+
+    if not ssid and not password:
+        continue
+
+    if not ssid or not password:
+        raise SystemExit(f"{prefix}: both SSID and PASSWORD are required")
+
+    if not (8 <= len(password) <= 63 or
+            (len(password) == 64 and all(c in "0123456789abcdefABCDEF" for c in password))):
+        raise SystemExit(f"{prefix}: invalid WPA-PSK password length")
+
+    content = f"""[connection]
+id=OpenHU {name}
+uuid={uuid.uuid4()}
+type=wifi
+autoconnect=true
+autoconnect-priority={priority}
+
+[wifi]
+mode=infrastructure
+ssid={escape(ssid)}
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk={escape(password)}
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+"""
+
+    path = directory / f"openhu-{name}.nmconnection"
+    path.write_text(content)
+    path.chmod(0o600)
+    print(f"Added Wi-Fi profile: {name}")
+PY
+
+  EXTRA+=("--extra-tree=local/wifi-extra:/")
+fi
 if ! ls packages/openhu_*_"$DEB_ARCH".deb packages/libaasdk_*_"$DEB_ARCH".deb >/dev/null 2>&1; then
   echo "packages/ needs openhu_*_$DEB_ARCH.deb and libaasdk_*_$DEB_ARCH.deb: run ARCH=$DEB_ARCH scripts/fetch-debs.sh first" >&2
   exit 1
